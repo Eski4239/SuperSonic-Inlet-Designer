@@ -42,6 +42,7 @@ def test_recovery_increases_with_more_ramps(M_inf):
     assert len(set(recoveries)) == len(recoveries)
 
 
+# SOURCE: NACA TN 3589 Fig. 8, normal-shock inlet: approx. 0.33 at M0=3, approx. 0.14 at M0=4.
 def test_zero_ramps_equals_normal_shock():
     for M_inf in [2.0, 3.0, 4.0]:
         result = opt.optimize_equal_strength(M_inf, 0)
@@ -50,12 +51,37 @@ def test_zero_ramps_equals_normal_shock():
         assert result["Mn"] is None
 
 
-# REGRESSION: computed by this code (Phase 2b). Cross-check vs
-# NACA TN 3589 Fig. 9 (n=1) and Fig. 11 (n=2).
-@pytest.mark.parametrize("n_ramps, expected", [(1, 0.5812), (2, 0.7437), (3, 0.8361)])
+# REGRESSION: computed by this code. Consistent with NACA TN 3589 Fig. 8 (one-cone inlet
+# approx. 0.6 at M0=3); 2D wedge value expected slightly lower than cone.
+def test_regression_recovery_at_M3_n1():
+    result = opt.optimize_equal_strength(3.0, 1)
+    assert result["recovery"] == pytest.approx(0.5812, rel=1e-3)
+
+
+# SOURCE: NACA TN 3589 (Connors & Meyer, 1956) Fig. 11(b), double-wedge inlet, no internal
+# contraction. Read at M0=3: recovery ~0.75, lambda1 ~15 deg, lambda2 ~19 deg (incremental).
+# Code: 0.7437, 14.98 deg, 18.81 deg.
+def test_regression_recovery_at_M3_n2():
+    result = opt.optimize_equal_strength(3.0, 2)
+    assert result["recovery"] == pytest.approx(0.7437, rel=1e-3)
+
+
+@pytest.mark.parametrize("n_ramps, expected", [(3, 0.8361)])
 def test_regression_recovery_at_M3(n_ramps, expected):
     result = opt.optimize_equal_strength(3.0, n_ramps)
     assert result["recovery"] == pytest.approx(expected, rel=1e-3)
+
+
+# SOURCE: NACA TN 3589 (Connors & Meyer, 1956) Fig. 11(b), double-wedge inlet, no internal
+# contraction. Read at M0=3: recovery ~0.75, lambda1 ~15 deg, lambda2 ~19 deg (incremental).
+# Code: 0.7437, 14.98 deg, 18.81 deg.
+@pytest.mark.parametrize("M_inf, expected_ramps", [(3.0, [15.0, 19.0]), (4.0, [16.0, 22.0])])
+def test_optimum_2ramp_angles_vs_naca_tn3589(M_inf, expected_ramps):
+    eq = opt.optimize_equal_strength(M_inf, 2)
+    num = opt.optimize_numerical(M_inf, 2)
+    for ramps in (eq["ramps"], num["ramps"]):
+        assert ramps[0] == pytest.approx(expected_ramps[0], abs=0.5)
+        assert ramps[1] == pytest.approx(expected_ramps[1], abs=0.5)
 
 
 def test_invalid_Mn_raises():

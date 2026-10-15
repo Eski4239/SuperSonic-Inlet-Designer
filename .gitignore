@@ -45,3 +45,6 @@ Thumbs.db
 desktop.ini
 .DS_Store
 .vscode/
+
+# Generated example outputs
+examples/output/

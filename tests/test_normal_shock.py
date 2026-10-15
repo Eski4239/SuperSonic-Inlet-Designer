@@ -23,7 +23,8 @@ def test_downstream_mach_is_subsonic(M1):
     assert ns.mach_downstream(M1) < 1.0
 
 
-# VERIFY against NACA 1135 (user-supplied, gamma=1.4, M1=2.0; pending confirmation against the table)
+# SOURCE: NACA 1135 normal-shock table, M1=2.00 (tabulated to 4 s.f.: M2 0.5774, p2/p1 4.500,
+# T2/T1 1.688, rho2/rho1 2.667, p02/p01 0.7209). Test values are the exact closed-form results.
 def test_naca_1135_cross_check_M1_2():
     assert ns.mach_downstream(2.0) == pytest.approx(0.5774, rel=1e-3)
     assert ns.pressure_ratio(2.0) == pytest.approx(4.5, rel=1e-3)

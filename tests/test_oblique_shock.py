@@ -47,7 +47,9 @@ def test_total_temperature_conserved(M1, theta):
     assert T0_T1 == pytest.approx(T0_T2 * state["T2_T1"], rel=1e-6)
 
 
-# VERIFY against NACA 1135 (user-supplied, gamma=1.4, M1=2.0, theta=10deg weak; pending confirmation)
+# SOURCE: NACA 1135 Charts 2, 3, 4 (pp. 654-658). NACA notation: theta = shock angle,
+# delta = deflection (swapped vs this code). Chart readings approx.: beta ~39 deg,
+# M2 ~1.64, Cp ~0.25 -> p2/p1 = 1 + 2.8*Cp ~1.70. Exact values set by the closed-form relations.
 def test_naca_1135_cross_check_M1_2_theta_10_weak():
     state = obl.oblique_shock_state(2.0, 10.0, weak=True)
     assert state["beta"] == pytest.approx(39.31, rel=1e-3)
@@ -55,7 +57,7 @@ def test_naca_1135_cross_check_M1_2_theta_10_weak():
     assert state["p2_p1"] == pytest.approx(1.707, rel=1e-3)
 
 
-# VERIFY against NACA 1135 (user-supplied, gamma=1.4, M1=2.0; pending confirmation)
+# SOURCE: NACA 1135 Chart 2, p. 654: M1=2.0 curve tip at delta ~23 deg.
 def test_naca_1135_max_deflection_M1_2():
     theta_max, _ = obl.max_deflection(2.0)
     assert theta_max == pytest.approx(22.97, rel=1e-3)

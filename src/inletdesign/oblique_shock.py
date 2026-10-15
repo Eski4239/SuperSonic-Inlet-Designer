@@ -6,6 +6,7 @@ this public API (converted to radians internally). Oblique shock states are
 obtained by decomposing the flow into the shock-normal Mach number
 Mn1 = M1*sin(beta) and reusing the normal_shock relations on that component.
 Reference: NACA Report 1135, oblique shock relations (theta-beta-M chart).
+Notation: theta = flow deflection, beta = shock angle (NACA 1135 uses the reverse).
 """
 import numpy as np
 from scipy.optimize import brentq, minimize_scalar

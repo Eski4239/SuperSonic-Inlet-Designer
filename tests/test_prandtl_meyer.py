@@ -19,7 +19,8 @@ def test_accepts_arrays():
     assert pm.nu(M).shape == (3,)
 
 
-# VERIFY against NACA 1135 (user-supplied, gamma=1.4; pending confirmation against the table)
+# SOURCE: NACA 1135 Table II, nu at M=2.00 = 26.38 deg.
+# nu_max: closed form (pi/2)*(sqrt(6) - 1) rad = 130.45 deg for gamma = 1.4.
 def test_naca_1135_cross_check():
     assert pm.nu(2.0) == pytest.approx(26.38, rel=1e-3)
     assert pm.nu_max() == pytest.approx(130.45, rel=1e-3)

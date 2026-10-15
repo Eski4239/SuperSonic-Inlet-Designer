@@ -1,0 +1,22 @@
+# supersonic-inlet-designer
+
+An open-source Python tool for designing 2D external-compression supersonic inlets (Mach 2-6) from compressible-flow theory, with relations verified against [NACA Report 1135, "Equations, Tables, and Charts for Compressible Flow"](https://ntrs.nasa.gov/citations/19930091059) (NASA NTRS) and later validated against Fluent CFD results.
+
+A local copy of NACA 1135 is kept in `references/` for development but is gitignored (not committed) — use the NTRS link above to obtain it.
+
+## Roadmap
+
+- **Phase 0 — Scaffolding**: project structure, function stubs, test skeletons, tooling (this phase).
+- **Phase 1 — Compressible flow relations**: implement and verify isentropic, normal shock, oblique shock, and Prandtl-Meyer relations against NACA 1135.
+- **Phase 2 — Inlet geometry and design logic**: compose the flow relations into 2D external-compression inlet design (ramp angles, shock-on-lip conditions, geometry export).
+- **Phase 3 — CFD validation**: validate designed inlet geometries against Fluent simulations.
+
+## Setup (Windows)
+
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install -e .
+pip install -r requirements.txt
+pytest
+```

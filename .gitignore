@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Fluent / CFD files
+*.cas
+*.cas.h5
+*.dat
+*.dat.h5
+*.h5
+*.trn
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+# Reference documents (link in README instead)
+references/*.pdf
+
+# Ansys Fluent (large binaries) - export results to CSV in cfd/ instead
+*.cas
+*.dat
+*.cas.h5
+*.dat.h5
+*.msh
+*.trn
+*.bak
+cfd/**/*_files/
+
+# SolidWorks temp/lock files
+~$*
+
+# OS / editor
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/

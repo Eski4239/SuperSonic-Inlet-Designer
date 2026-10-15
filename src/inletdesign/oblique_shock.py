@@ -1,96 +1,100 @@
 """Oblique shock relations for a calorically perfect gas.
 
-All functions take Mach numbers (dimensionless) and angles in radians unless
-otherwise noted, plus the ratio of specific heats gamma (dimensionless,
-default 1.4 for air). Governing relations come from two-dimensional oblique
-shock theory (e.g. NACA Report 1135, Eqs. 122-130 and the theta-beta-M
-chart), obtained by applying normal-shock relations to the velocity
-component normal to the shock, M1 * sin(beta).
+All functions take the upstream Mach number M1 (dimensionless, M1 >= 1) and
+ratio of specific heats gamma (default 1.4, air). Angles are in DEGREES at
+this public API (converted to radians internally). Oblique shock states are
+obtained by decomposing the flow into the shock-normal Mach number
+Mn1 = M1*sin(beta) and reusing the normal_shock relations on that component.
+Reference: NACA Report 1135, oblique shock relations (theta-beta-M chart).
 """
+import numpy as np
+from scipy.optimize import brentq, minimize_scalar
+
+from . import normal_shock as ns
 
 
-def deflection_angle(M1, beta, gamma=1.4):
-    """Flow deflection angle theta produced by a given shock angle beta.
+def _validate(M1, gamma):
+    M1 = np.asarray(M1, dtype=float)
+    if gamma <= 1.0:
+        raise ValueError("gamma must be > 1")
+    if np.any(M1 < 1.0):
+        raise ValueError("M1 must be >= 1 (oblique shock requires supersonic upstream flow)")
+    return M1
 
-    Inputs:
-        M1: upstream Mach number (dimensionless, M1 >= 1)
-        beta: oblique shock angle relative to the upstream flow (radians)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        theta: flow deflection angle (radians)
-    Governing equation (in words):
-        tan(theta) equals 2*cot(beta) times [M1 squared * sin(beta) squared
-        minus 1] divided by [M1 squared * (gamma + cos(2*beta)) plus 2].
-        This is the theta-beta-M relation, derived by applying normal-shock
-        jump conditions to the shock-normal Mach number component M1*sin(beta)
-        and resolving velocities into shock-tangential and shock-normal parts.
+
+def _mach_angle_deg(M1):
+    return np.degrees(np.arcsin(1.0 / M1))
+
+
+def theta_from_beta(M1, beta_deg, gamma=1.4):
+    """theta-beta-M relation: tan(theta) = 2*cot(beta)*(M1^2*sin(beta)^2 - 1) / (M1^2*(gamma+cos(2*beta)) + 2)."""
+    M1 = _validate(M1, gamma)
+    beta = np.radians(beta_deg)
+    numerator = M1**2 * np.sin(beta) ** 2 - 1.0
+    denominator = M1**2 * (gamma + np.cos(2.0 * beta)) + 2.0
+    tan_theta = 2.0 / np.tan(beta) * numerator / denominator
+    return np.degrees(np.arctan(tan_theta))
+
+
+def max_deflection(M1, gamma=1.4):
+    """theta_max and the beta at which it occurs, found by maximizing theta_from_beta over beta."""
+    M1 = _validate(M1, gamma)
+    mach_angle = float(_mach_angle_deg(M1))
+
+    def neg_theta(beta_deg):
+        return -theta_from_beta(M1, beta_deg, gamma)
+
+    result = minimize_scalar(
+        neg_theta, bounds=(mach_angle + 1e-9, 90.0 - 1e-9), method="bounded"
+    )
+    beta_at_max = float(result.x)
+    theta_max = float(-result.fun)
+    return theta_max, beta_at_max
+
+
+def beta_from_theta(M1, theta_deg, gamma=1.4, weak=True):
+    """Invert the theta-beta-M relation for beta, selecting the weak or strong root."""
+    M1 = _validate(M1, gamma)
+    theta_max, beta_at_max = max_deflection(M1, gamma)
+    if theta_deg > theta_max:
+        raise ValueError(
+            f"theta={theta_deg} deg exceeds theta_max={theta_max:.4f} deg for M1={float(M1)}: "
+            "shock detaches, no attached oblique shock solution exists"
+        )
+    mach_angle = float(_mach_angle_deg(M1))
+    if theta_deg <= 0.0:
+        return mach_angle if weak else 90.0
+
+    def f(beta_deg):
+        return theta_from_beta(M1, beta_deg, gamma) - theta_deg
+
+    if weak:
+        return brentq(f, mach_angle, beta_at_max, xtol=1e-10)
+    return brentq(f, beta_at_max, 90.0, xtol=1e-10)
+
+
+def oblique_shock_state(M1, theta_deg, gamma=1.4, weak=True):
+    """Full post-shock state for the oblique shock solving the given deflection theta.
+
+    Returns a dict with keys: beta, M2, p2_p1, T2_T1, rho2_rho1, p02_p01
+    (beta in degrees). Computed by applying normal_shock relations to the
+    shock-normal Mach number Mn1 = M1*sin(beta), then recovering M2 via
+    M2 = Mn2 / sin(beta - theta).
     """
-    raise NotImplementedError
-
-
-def shock_angle(M1, theta, gamma=1.4, weak=True):
-    """Shock angle beta for a given upstream Mach number and deflection angle.
-
-    Inputs:
-        M1: upstream Mach number (dimensionless, M1 >= 1)
-        theta: flow deflection angle (radians, 0 <= theta <= theta_max(M1))
-        gamma: ratio of specific heats cp/cv (dimensionless)
-        weak: if True, return the weak-shock solution (smaller beta); if
-            False, return the strong-shock solution (larger beta). The
-            theta-beta-M relation has two valid roots for beta (plus the
-            trivial Mach-wave root) when theta < theta_max.
-    Output:
-        beta: oblique shock angle (radians)
-    Governing equation (in words):
-        Invert the theta-beta-M relation (see deflection_angle) for beta
-        given M1 and theta, typically via iterative root-finding, selecting
-        the weak or strong root as requested.
-    Raises:
-        ValueError: if theta exceeds max_deflection_angle(M1, gamma), since
-            no attached oblique shock solution exists (the shock detaches).
-    """
-    raise NotImplementedError
-
-
-def max_deflection_angle(M1, gamma=1.4):
-    """Maximum flow deflection angle theta_max for a given upstream Mach number.
-
-    Inputs:
-        M1: upstream Mach number (dimensionless, M1 >= 1)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        theta_max (radians): the largest deflection angle for which an
-        attached oblique shock solution exists at this M1. Deflections
-        beyond this angle cause the shock to detach from the surface and
-        form a curved, detached bow shock.
-    Governing equation (in words):
-        theta_max is the value of theta at the point where d(theta)/d(beta)
-        equals zero on the theta-beta-M curve for the given M1, found by
-        maximizing the deflection_angle relation over beta.
-    """
-    raise NotImplementedError
-
-
-def post_shock_state(M1, beta, gamma=1.4):
-    """Full post-shock flow state for an oblique shock of angle beta.
-
-    Inputs:
-        M1: upstream Mach number (dimensionless, M1 >= 1)
-        beta: oblique shock angle relative to the upstream flow (radians)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        A mapping (e.g. dict) with keys:
-            "M2": downstream Mach number (dimensionless)
-            "p2_p1": static pressure ratio (dimensionless)
-            "T2_T1": static temperature ratio (dimensionless)
-            "rho2_rho1": density ratio (dimensionless)
-            "p02_p01": stagnation pressure ratio (dimensionless)
-            "theta": flow deflection angle (radians)
-    Governing equation (in words):
-        Decompose the upstream Mach number into shock-normal component
-        M1n = M1*sin(beta), apply the normal_shock relations to M1n to get
-        M2n and the ratios, then recover M2 by recombining M2n with the
-        unchanged shock-tangential velocity component via
-        M2 = M2n / sin(beta - theta).
-    """
-    raise NotImplementedError
+    beta_deg = beta_from_theta(M1, theta_deg, gamma, weak)
+    beta = np.radians(beta_deg)
+    Mn1 = M1 * np.sin(beta)
+    Mn2 = ns.mach_downstream(Mn1, gamma)
+    p2_p1 = ns.pressure_ratio(Mn1, gamma)
+    T2_T1 = ns.temperature_ratio(Mn1, gamma)
+    rho2_rho1 = ns.density_ratio(Mn1, gamma)
+    p02_p01 = ns.stagnation_pressure_ratio(Mn1, gamma)
+    M2 = Mn2 / np.sin(np.radians(beta_deg - theta_deg))
+    return {
+        "beta": float(beta_deg),
+        "M2": float(M2),
+        "p2_p1": float(p2_p1),
+        "T2_T1": float(T2_T1),
+        "rho2_rho1": float(rho2_rho1),
+        "p02_p01": float(p02_p01),
+    }

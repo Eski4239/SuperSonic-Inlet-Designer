@@ -1,30 +1,34 @@
+import numpy as np
 import pytest
 
-from inletdesign import prandtl_meyer
+from inletdesign import prandtl_meyer as pm
 
 
-@pytest.mark.skip(reason="reference value not verified")
 def test_nu_at_M1_is_zero():
-    # nu(1) = 0 by definition (zero turning angle to reach sonic condition).
-    assert prandtl_meyer.nu(1.0) == pytest.approx(0.0)
+    assert pm.nu(1.0) == pytest.approx(0.0, abs=1e-8)
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_nu_table():
-    # VERIFY: NACA 1135, Table III, M=2.0, gamma=1.4
-    expected_nu = None  # TODO: fill in from NACA 1135 Table III
-    assert prandtl_meyer.nu(2.0) == pytest.approx(expected_nu)
+@pytest.mark.parametrize("M", [1.2, 2.0, 3.0, 5.0, 8.0])
+def test_mach_from_nu_round_trip(M):
+    nu_val = pm.nu(M)
+    assert pm.mach_from_nu(nu_val) == pytest.approx(M, rel=1e-6)
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_mach_from_nu_table():
-    # VERIFY: NACA 1135, Table III, nu -> M
-    expected_M = None  # TODO: fill in from NACA 1135 Table III
-    nu_value = None  # TODO: corresponding nu
-    assert prandtl_meyer.mach_from_nu(nu_value) == pytest.approx(expected_M)
+def test_accepts_arrays():
+    M = np.array([1.0, 2.0, 3.0])
+    assert pm.nu(M).shape == (3,)
 
 
-@pytest.mark.skip(reason="not yet implemented")
-def test_nu_raises_for_subsonic_mach():
+# VERIFY against NACA 1135 (user-supplied, gamma=1.4; pending confirmation against the table)
+def test_naca_1135_cross_check():
+    assert pm.nu(2.0) == pytest.approx(26.38, rel=1e-3)
+    assert pm.nu_max() == pytest.approx(130.45, rel=1e-3)
+
+
+def test_invalid_inputs_raise():
     with pytest.raises(ValueError):
-        prandtl_meyer.nu(0.5)
+        pm.nu(0.5)
+    with pytest.raises(ValueError):
+        pm.nu(2.0, gamma=1.0)
+    with pytest.raises(ValueError):
+        pm.mach_from_nu(pm.nu_max())

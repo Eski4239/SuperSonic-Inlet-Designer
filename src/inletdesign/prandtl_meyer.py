@@ -1,49 +1,51 @@
 """Prandtl-Meyer expansion relations for a calorically perfect gas.
 
-All functions take the ratio of specific heats gamma (dimensionless, default
-1.4 for air). Governing relations come from steady, isentropic, supersonic
-expansion-fan theory (e.g. NACA Report 1135, Eq. 131 / Table III).
+All functions take Mach number M (dimensionless, M >= 1) and ratio of
+specific heats gamma (default 1.4, air). Angles are in DEGREES at this
+public API. Scalars and NumPy arrays are accepted for the closed-form
+functions. Reference: NACA Report 1135, Prandtl-Meyer function.
 """
+import numpy as np
+from scipy.optimize import brentq
+
+
+def _validate(M, gamma):
+    M = np.asarray(M, dtype=float)
+    if gamma <= 1.0:
+        raise ValueError("gamma must be > 1")
+    if np.any(M < 1.0):
+        raise ValueError("M must be >= 1 (Prandtl-Meyer function requires supersonic flow)")
+    return M
 
 
 def nu(M, gamma=1.4):
-    """Prandtl-Meyer function value for a given Mach number.
-
-    Inputs:
-        M: Mach number (dimensionless, M >= 1)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        nu(M) (radians): the angle through which a supersonic flow must turn,
-        starting from M=1, to reach Mach number M via an isentropic
-        expansion.
-    Governing equation (in words):
-        nu(M) equals sqrt[(gamma+1)/(gamma-1)] times arctan(sqrt[(gamma-1)/
-        (gamma+1) * (M squared - 1)]) minus arctan(sqrt(M squared - 1)).
-        This is obtained by integrating the differential relation between
-        flow-turning angle and Mach number along a simple-wave (isentropic,
-        irrotational) expansion.
-    Raises:
-        ValueError: if M < 1 (the Prandtl-Meyer function is only defined for
-            supersonic flow).
-    """
-    raise NotImplementedError
+    """nu(M) = sqrt((gamma+1)/(gamma-1)) * arctan(sqrt((gamma-1)/(gamma+1)*(M^2-1))) - arctan(sqrt(M^2-1))."""
+    M = _validate(M, gamma)
+    k = np.sqrt((gamma + 1.0) / (gamma - 1.0))
+    term = np.sqrt(M**2 - 1.0)
+    nu_rad = k * np.arctan(term / k) - np.arctan(term)
+    return np.degrees(nu_rad)
 
 
-def mach_from_nu(nu_value, gamma=1.4):
-    """Invert the Prandtl-Meyer function to find Mach number from nu.
+def nu_max(gamma=1.4):
+    """nu_max = 90 * (sqrt((gamma+1)/(gamma-1)) - 1) degrees, the M -> infinity limit."""
+    if gamma <= 1.0:
+        raise ValueError("gamma must be > 1")
+    return 90.0 * (np.sqrt((gamma + 1.0) / (gamma - 1.0)) - 1.0)
 
-    Inputs:
-        nu_value: Prandtl-Meyer angle (radians, 0 <= nu_value < nu_max(gamma),
-            where nu_max = (pi/2) * [sqrt((gamma+1)/(gamma-1)) - 1])
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        M (dimensionless, M >= 1)
-    Governing equation (in words):
-        Solve nu(M, gamma) == nu_value for M (see nu()), typically via
-        iterative root-finding since the relation is not explicitly
-        invertible in closed form.
-    Raises:
-        ValueError: if nu_value is negative or exceeds the maximum
-            attainable value nu_max(gamma) (corresponding to M -> infinity).
-    """
-    raise NotImplementedError
+
+def mach_from_nu(nu_deg, gamma=1.4):
+    """Invert nu(M) for M via Brent's method on f(M) = nu(M, gamma) - nu_deg."""
+    if gamma <= 1.0:
+        raise ValueError("gamma must be > 1")
+    max_nu = nu_max(gamma)
+    if nu_deg < 0.0 or nu_deg >= max_nu:
+        raise ValueError(f"nu must be in [0, {max_nu}) degrees for gamma={gamma}")
+
+    def f(M):
+        return nu(M, gamma) - nu_deg
+
+    upper = 2.0
+    while f(upper) < 0:
+        upper *= 2.0
+    return float(brentq(f, 1.0, upper, xtol=1e-12))

@@ -1,54 +1,50 @@
+import numpy as np
 import pytest
 
-from inletdesign import isentropic
+from inletdesign import isentropic as isen
+
+# Reference values, gamma = 1.4. Cross-check one row against NACA 1135 Table I
+# (the table lists p/p0, T/T0, rho/rho0 - the inverses of these).
+REFERENCE = [
+    # M,   T0/T,  p0/p,   rho0/rho, A/A*
+    (1.0,  1.2,   1.8929, 1.5774,   1.0),
+    (2.0,  1.8,   7.8245, 4.3469,   1.6875),
+]
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_stagnation_temperature_ratio_at_M1():
-    # At M=1, T0/T has a known closed-form value (not a NACA table lookup),
-    # but left skipped until the implementation and this check are confirmed.
-    assert isentropic.stagnation_temperature_ratio(1.0) == pytest.approx(1.2)
+@pytest.mark.parametrize("M, T, p, rho, A", REFERENCE)
+def test_forward_relations(M, T, p, rho, A):
+    assert isen.stagnation_temperature_ratio(M) == pytest.approx(T, rel=1e-4)
+    assert isen.stagnation_pressure_ratio(M) == pytest.approx(p, rel=1e-4)
+    assert isen.stagnation_density_ratio(M) == pytest.approx(rho, rel=1e-4)
+    assert isen.area_mach_ratio(M) == pytest.approx(A, rel=1e-4)
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_stagnation_pressure_ratio_table():
-    # VERIFY: NACA 1135, Table I, M=2.0, gamma=1.4
-    expected_p0_p = None  # TODO: fill in from NACA 1135 Table I
-    assert isentropic.stagnation_pressure_ratio(2.0) == pytest.approx(expected_p0_p)
+def test_stagnation_ratios_at_rest_are_one():
+    assert isen.stagnation_temperature_ratio(0.0) == pytest.approx(1.0)
+    assert isen.stagnation_pressure_ratio(0.0) == pytest.approx(1.0)
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_stagnation_density_ratio_table():
-    # VERIFY: NACA 1135, Table I, M=2.0, gamma=1.4
-    expected_rho0_rho = None  # TODO: fill in from NACA 1135 Table I
-    assert isentropic.stagnation_density_ratio(2.0) == pytest.approx(expected_rho0_rho)
+def test_accepts_arrays():
+    M = np.array([0.5, 1.0, 2.0])
+    assert isen.stagnation_temperature_ratio(M).shape == (3,)
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_area_mach_ratio_at_M1():
-    # A/A* = 1 at the sonic throat (M=1), a structural identity rather than
-    # a table lookup, but left skipped until implementation is confirmed.
-    assert isentropic.area_mach_ratio(1.0) == pytest.approx(1.0)
+@pytest.mark.parametrize("M", [0.2, 0.5, 0.9, 1.5, 2.0, 3.0, 5.0, 8.0])
+def test_area_ratio_round_trip(M):
+    ratio = isen.area_mach_ratio(M)
+    recovered = isen.mach_from_area_ratio(ratio, supersonic=(M > 1))
+    assert recovered == pytest.approx(M, rel=1e-8)
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_area_mach_ratio_table():
-    # VERIFY: NACA 1135, Table I, M=2.0, gamma=1.4
-    expected_area_ratio = None  # TODO: fill in from NACA 1135 Table I
-    assert isentropic.area_mach_ratio(2.0) == pytest.approx(expected_area_ratio)
+def test_area_ratio_one_is_sonic():
+    assert isen.mach_from_area_ratio(1.0) == 1.0
 
 
-@pytest.mark.skip(reason="reference value not verified")
-def test_mach_from_area_ratio_supersonic_branch():
-    # VERIFY: NACA 1135, Table I, A/A* -> M (supersonic branch)
-    expected_M = None  # TODO: fill in from NACA 1135 Table I
-    area_ratio = None  # TODO: corresponding A/A*
-    assert isentropic.mach_from_area_ratio(area_ratio, supersonic=True) == pytest.approx(expected_M)
-
-
-@pytest.mark.skip(reason="reference value not verified")
-def test_mach_from_area_ratio_subsonic_branch():
-    # VERIFY: NACA 1135, Table I, A/A* -> M (subsonic branch)
-    expected_M = None  # TODO: fill in from NACA 1135 Table I
-    area_ratio = None  # TODO: corresponding A/A*
-    assert isentropic.mach_from_area_ratio(area_ratio, supersonic=False) == pytest.approx(expected_M)
+def test_invalid_inputs_raise():
+    with pytest.raises(ValueError):
+        isen.stagnation_temperature_ratio(-1.0)
+    with pytest.raises(ValueError):
+        isen.area_mach_ratio(0.0)
+    with pytest.raises(ValueError):
+        isen.mach_from_area_ratio(0.5)

@@ -1,95 +1,66 @@
 """Isentropic flow relations for a calorically perfect gas.
 
-All functions take the local Mach number M (dimensionless) and the ratio of
-specific heats gamma (dimensionless, default 1.4 for air) and return the
-indicated dimensionless ratio. Governing relations come from one-dimensional
-isentropic flow theory (e.g. NACA Report 1135, Table I / Eqs. 44-47).
+All functions take Mach number M (dimensionless) and ratio of specific heats
+gamma (default 1.4, air). Scalars and NumPy arrays are both accepted.
+Reference: NACA Report 1135, isentropic flow relations.
 """
+import numpy as np
+from scipy.optimize import brentq
+
+
+def _validate(M, gamma, allow_zero=True):
+    M = np.asarray(M, dtype=float)
+    if gamma <= 1.0:
+        raise ValueError("gamma must be > 1")
+    if allow_zero and np.any(M < 0):
+        raise ValueError("Mach number must be >= 0")
+    if not allow_zero and np.any(M <= 0):
+        raise ValueError("Mach number must be > 0")
+    return M
 
 
 def stagnation_temperature_ratio(M, gamma=1.4):
-    """Ratio of stagnation to static temperature, T0/T.
-
-    Inputs:
-        M: Mach number (dimensionless, M >= 0)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        T0/T (dimensionless)
-    Governing equation (in words):
-        T0/T equals one plus (gamma minus one) over two, times M squared.
-        This follows from conservation of energy for adiabatic flow of a
-        calorically perfect gas, relating static and stagnation temperature
-        through the local kinetic energy per unit mass.
-    """
-    raise NotImplementedError
+    """T0/T = 1 + (gamma-1)/2 * M^2  (energy conservation, adiabatic flow)."""
+    M = _validate(M, gamma)
+    return 1.0 + 0.5 * (gamma - 1.0) * M**2
 
 
 def stagnation_pressure_ratio(M, gamma=1.4):
-    """Ratio of stagnation to static pressure, p0/p.
-
-    Inputs:
-        M: Mach number (dimensionless, M >= 0)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        p0/p (dimensionless)
-    Governing equation (in words):
-        p0/p equals the stagnation temperature ratio (T0/T) raised to the
-        power gamma/(gamma minus one). This follows from combining the
-        isentropic relation between pressure and temperature (p proportional
-        to T^(gamma/(gamma-1))) with the energy-derived temperature ratio.
-    """
-    raise NotImplementedError
+    """p0/p = (T0/T)^(gamma/(gamma-1))  (isentropic)."""
+    return stagnation_temperature_ratio(M, gamma) ** (gamma / (gamma - 1.0))
 
 
 def stagnation_density_ratio(M, gamma=1.4):
-    """Ratio of stagnation to static density, rho0/rho.
-
-    Inputs:
-        M: Mach number (dimensionless, M >= 0)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        rho0/rho (dimensionless)
-    Governing equation (in words):
-        rho0/rho equals the stagnation temperature ratio (T0/T) raised to
-        the power 1/(gamma minus one). This follows from the isentropic
-        relation between density and temperature (rho proportional to
-        T^(1/(gamma-1))) combined with the energy-derived temperature ratio.
-    """
-    raise NotImplementedError
+    """rho0/rho = (T0/T)^(1/(gamma-1))  (isentropic)."""
+    return stagnation_temperature_ratio(M, gamma) ** (1.0 / (gamma - 1.0))
 
 
 def area_mach_ratio(M, gamma=1.4):
-    """Ratio of local duct area to sonic (throat) area, A/A*.
-
-    Inputs:
-        M: Mach number (dimensionless, M > 0)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-    Output:
-        A/A* (dimensionless, >= 1)
-    Governing equation (in words):
-        A/A* is derived from mass continuity between a point at Mach M and
-        the sonic throat (M=1), expressed using the isentropic stagnation
-        density and temperature ratios: A/A* equals (1/M) times the ratio of
-        [one plus (gamma-1)/2 times M squared] to [one plus (gamma-1)/2],
-        raised to the power (gamma+1)/(2*(gamma-1)).
-    """
-    raise NotImplementedError
+    """A/A* = (1/M) * [2/(gamma+1) * (1 + (gamma-1)/2 * M^2)]^((gamma+1)/(2(gamma-1)))."""
+    M = _validate(M, gamma, allow_zero=False)
+    base = (2.0 / (gamma + 1.0)) * (1.0 + 0.5 * (gamma - 1.0) * M**2)
+    exponent = (gamma + 1.0) / (2.0 * (gamma - 1.0))
+    return base**exponent / M
 
 
 def mach_from_area_ratio(area_ratio, gamma=1.4, supersonic=True):
-    """Invert the area-Mach relation to find M given A/A*.
+    """Invert A/A* -> M on the chosen branch using Brent's root-finding method.
 
-    Inputs:
-        area_ratio: A/A* (dimensionless, >= 1)
-        gamma: ratio of specific heats cp/cv (dimensionless)
-        supersonic: if True, return the supersonic (M > 1) root; if False,
-            return the subsonic (M < 1) root. The area-Mach relation is
-            two-to-one (except at A/A*=1), so this flag selects the branch.
-    Output:
-        M (dimensionless)
-    Governing equation (in words):
-        Solve area_mach_ratio(M, gamma) == area_ratio for M on the requested
-        branch, typically via iterative root-finding since the relation is
-        not explicitly invertible in closed form.
+    Every A/A* > 1 has two solutions: one subsonic, one supersonic.
     """
-    raise NotImplementedError
+    if area_ratio < 1.0:
+        raise ValueError("A/A* must be >= 1")
+    if np.isclose(area_ratio, 1.0):
+        return 1.0
+
+    def f(M):
+        return area_mach_ratio(M, gamma) - area_ratio
+
+    if supersonic:
+        # f(1) < 0; grow the upper bound until f > 0 so brentq has a sign change
+        upper = 2.0
+        while f(upper) < 0:
+            upper *= 2.0
+        return float(brentq(f, 1.0, upper, xtol=1e-12))
+    # subsonic: A/A* -> infinity as M -> 0, so f > 0 near zero and f(1) < 0
+    return float(brentq(f, 1e-8, 1.0, xtol=1e-12))

@@ -20,3 +20,29 @@ pip install -e .
 pip install -r requirements.txt
 pytest
 ```
+
+## Quick start
+
+After `pip install -e .`, the `inletdesign` command is available on the PATH (inside the venv).
+
+Design a single inlet (M=3, 2 ramps) and write a schematic, a DXF, and a JSON summary:
+
+```powershell
+inletdesign design --mach 3.0 --ramps 2 --out results/m3_2r
+```
+
+This prints a table of ramp/shock angles, per-region Mach number and pressure recovery to the
+terminal, and writes `results/m3_2r.png`, `results/m3_2r.dxf`, and `results/m3_2r.json`. The PNG
+is a light, technical line drawing of the inlet (ramp, cowl, shocks, Mach labels per region), for
+example:
+
+![example inlet design](results/m3_2r.png)
+
+Sweep optimum pressure recovery against freestream Mach number for several ramp counts:
+
+```powershell
+inletdesign curve --ramps 0 1 2 3 --mach-min 1.5 --mach-max 4.0 --step 0.1 --out results/curve
+```
+
+This writes `results/curve.csv` (one row per feasible Mach/ramp-count combination) and
+`results/curve.png` (recovery vs. M∞, one line per ramp count).

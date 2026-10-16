@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import inlet as _inlet
+from .cfd_domain import export_cfd_domain_dxf
 from .export import export_dxf
 from .geometry import design_inlet
 from .optimize import optimize_equal_strength
@@ -163,6 +164,25 @@ def _handle_curve(args):
     return 0
 
 
+def _handle_cfd_domain(args):
+    if args.mach <= 1:
+        raise CliError("mach must be > 1")
+    if args.ramps < 0:
+        raise CliError("ramps must be >= 0")
+
+    geom = design_inlet(args.mach, args.ramps, capture_height=args.capture_height)
+
+    out_dir = os.path.dirname(args.out)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+
+    dxf_path = f"{args.out}.dxf"
+    export_cfd_domain_dxf(geom, dxf_path)
+    print(f"wrote {dxf_path}")
+
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="inletdesign")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -183,6 +203,15 @@ def build_parser():
     curve_parser.add_argument("--step", type=float, required=True)
     curve_parser.add_argument("--out", type=str, default="results/curve")
     curve_parser.set_defaults(handler=_handle_curve)
+
+    cfd_domain_parser = subparsers.add_parser(
+        "cfd-domain", help="export a closed CFD fluid-domain outline (DXF)"
+    )
+    cfd_domain_parser.add_argument("--mach", type=float, required=True)
+    cfd_domain_parser.add_argument("--ramps", type=int, required=True)
+    cfd_domain_parser.add_argument("--capture-height", type=float, default=1.0)
+    cfd_domain_parser.add_argument("--out", type=str, default="results/cfd_domain")
+    cfd_domain_parser.set_defaults(handler=_handle_cfd_domain)
 
     return parser
 

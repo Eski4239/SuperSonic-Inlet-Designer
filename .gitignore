@@ -49,3 +49,9 @@ desktop.ini
 # Generated example outputs
 examples/output/
 results/
+
+# Ansys Workbench projects (large binaries, keep local; results go to docs/)
+*.wbpj
+*.wbpz
+cfd/**/.*.backup/
+cfd/**/*_files/

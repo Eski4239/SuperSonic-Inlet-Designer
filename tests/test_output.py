@@ -85,3 +85,41 @@ def test_dxf_include_shocks_false(geom, tmp_path):
 
     shock_entities = [e for e in msp if getattr(e.dxf, "layer", None) == "SHOCKS"]
     assert len(shock_entities) == 0
+
+
+def test_mach_labels_outside_ramp_body_and_distinct(geom):
+    fig, ax = plot_inlet(geom, units="hc")
+    h_c = 1.0  # units="hc" normalizes capture_height to 1.0 in display coordinates
+
+    mach_labels = [t for t in ax.texts if t.get_gid() and t.get_gid().startswith("mach_label_")]
+    assert len(mach_labels) > 0
+
+    divisor = geom.capture_height
+    ramp_disp = [(p[0] / divisor, p[1] / divisor) for p in geom.ramp_points]
+    ramp_xs = [p[0] for p in ramp_disp]
+    ramp_ys = [p[1] for p in ramp_disp]
+
+    def ramp_height_at(x):
+        if x < ramp_xs[0] or x > ramp_xs[-1]:
+            return None
+        for i in range(len(ramp_xs) - 1):
+            x0, x1 = ramp_xs[i], ramp_xs[i + 1]
+            if x0 <= x <= x1:
+                if x1 == x0:
+                    return ramp_ys[i]
+                frac = (x - x0) / (x1 - x0)
+                return ramp_ys[i] + frac * (ramp_ys[i + 1] - ramp_ys[i])
+        return None
+
+    positions = [t.get_position() for t in mach_labels]
+    for x, y in positions:
+        ramp_y = ramp_height_at(x)
+        if ramp_y is not None:
+            assert y > ramp_y
+
+    for i in range(len(positions)):
+        for j in range(i + 1, len(positions)):
+            dx = positions[i][0] - positions[j][0]
+            dy = positions[i][1] - positions[j][1]
+            dist = (dx**2 + dy**2) ** 0.5
+            assert dist >= 0.05 * h_c

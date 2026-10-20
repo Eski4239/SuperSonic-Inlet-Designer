@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import inlet as _inlet
-from .cfd_domain import export_cfd_domain_dxf
+from .cfd_domain import export_cfd_domain_dxf, export_offdesign_domain_dxf
 from .export import export_dxf
 from .geometry import design_inlet
 from .offdesign import off_design
@@ -181,6 +181,11 @@ def _handle_cfd_domain(args):
     export_cfd_domain_dxf(geom, dxf_path)
     print(f"wrote {dxf_path}")
 
+    if args.offdesign:
+        offdesign_path = f"{args.out}_offdesign.dxf"
+        export_offdesign_domain_dxf(geom, offdesign_path, top_height_factor=args.top_height_factor)
+        print(f"wrote {offdesign_path}")
+
     return 0
 
 
@@ -297,6 +302,8 @@ def build_parser():
     cfd_domain_parser.add_argument("--ramps", type=int, required=True)
     cfd_domain_parser.add_argument("--capture-height", type=float, default=1.0)
     cfd_domain_parser.add_argument("--out", type=str, default="results/cfd_domain")
+    cfd_domain_parser.add_argument("--offdesign", action="store_true")
+    cfd_domain_parser.add_argument("--top-height-factor", type=float, default=2.0)
     cfd_domain_parser.set_defaults(handler=_handle_cfd_domain)
 
     offdesign_parser = subparsers.add_parser(

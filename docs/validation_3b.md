@@ -126,6 +126,25 @@ Both ramp shocks still meet at the cowl lip, so the shock-on-lip design survives
 boundary layer. The 0.6% mass-flow deficit is therefore attributed to boundary-layer
 displacement and the bubble, not to shocks missing the lip.
 
+## Full inlet recovery including the terminal normal shock
+
+The tool's design recovery of **0.7437** includes the terminal normal shock in the duct. It is
+the product of two factors:
+
+- the oblique-shock recovery, 0.8018, and
+- the normal-shock recovery at the duct Mach number, 0.9275 at M = 1.5073.
+
+0.8018 × 0.9275 = 0.7436. The normal-shock factor follows exactly from the Rankine–Hugoniot
+relations, and its only input is the duct Mach number. Phase 3a validated that Mach number
+(CFD 1.5074 against tool 1.5073), so the full inviscid recovery is validated without a
+separate back-pressure simulation; a dedicated terminal-shock CFD phase (3c) was therefore
+not performed.
+
+Applying the same normal-shock factor to the viscous oblique recovery (0.783) gives an
+estimated viscous full recovery of about **0.728**. This is an upper bound: a Mach 1.5
+normal shock on the turbulent duct boundary layer is likely to cause further separation
+losses that this estimate does not include.
+
 ## Conclusions
 
 1. The 3b mesh is validated: inviscid results match 3a within 0.15%.

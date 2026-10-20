@@ -1,10 +1,20 @@
 """CFD fluid-domain outline export for Phase 3 meshing (SpaceClaim/Fluent import).
 
-Design-point domain only: the captured streamtube at the shock-on-lip design
-condition, extended downstream by a straight constant-area duct. Off-design
-operation (spillage, an external flow region ahead of the cowl) is not
-modeled here; that would require a farfield boundary and an external cowl
-surface, deferred to a later Phase 3 step.
+Two exporters:
+- export_cfd_domain_dxf: the design-point domain only -- the captured
+  streamtube at the shock-on-lip design condition, extended downstream by a
+  straight constant-area duct.
+- export_offdesign_domain_dxf: the same internal domain, extended with an
+  external spill region above the cowl line, upstream of the lip only, so an
+  off-design (spillage) shock has somewhere physical to go. No outer cowl
+  surface is modeled: upstream of the lip the flow is supersonic, so an outer
+  cowl shape cannot influence what's captured, and a realistic outer cowl
+  here would need a large incidence angle (>= the cowl's own flow-turning
+  angle) that would itself detach at the design Mach. This external region
+  is only valid while the first ramp shock stays attached and crosses
+  x = lip.x below the far-field top boundary (i.e. exits through OUTLET_EXT,
+  not FARFIELD_TOP) -- callers evaluating very low M_inf should check this
+  with offdesign.off_design() first.
 """
 import math
 
@@ -77,6 +87,90 @@ def export_cfd_domain_dxf(geom, path, duct_length_factor=2.0):
         "OUTLET": 3,
         "COWL": 5,
         "TOP_FREESTREAM": 6,
+    }
+    for name, color in layer_colors.items():
+        doc.layers.add(name, color=color)
+
+    for layer_name, points in boundaries:
+        points_mm = [_to_mm(p) for p in points]
+        if len(points_mm) == 2:
+            msp.add_line(points_mm[0], points_mm[1], dxfattribs={"layer": layer_name})
+        else:
+            msp.add_lwpolyline(points_mm, dxfattribs={"layer": layer_name})
+
+    doc.saveas(path)
+    return path
+
+
+def export_offdesign_domain_dxf(geom, path, duct_length_factor=2.0, top_height_factor=2.0):
+    """Write a closed 2D fluid-domain outline including an external spill region.
+
+    See the module docstring for the rationale (no outer cowl surface, and
+    when this domain is valid).
+
+    Layers: INLET, FARFIELD_TOP, OUTLET_EXT, COWL, OUTLET, RAMP, SYMMETRY.
+
+    Raises:
+        ValueError: if the resulting loop does not close (1e-9 tolerance).
+    """
+    h_c = geom.capture_height
+    tip = geom.ramp_points[0]
+    terminal_foot = geom.ramp_points[-1]
+    lip = geom.lip
+    phi_n = geom.cowl_angle_deg
+    dir_n = (math.cos(math.radians(phi_n)), math.sin(math.radians(phi_n)))
+
+    H = top_height_factor * h_c
+    inlet_x = tip[0] - 1.0 * h_c
+    inlet_bottom = (inlet_x, 0.0)
+    inlet_top_H = (inlet_x, H)
+    x_lip = lip[0]
+    farfield_top_end = (x_lip, H)
+
+    ramp_duct_end = (
+        terminal_foot[0] + duct_length_factor * h_c * dir_n[0],
+        terminal_foot[1] + duct_length_factor * h_c * dir_n[1],
+    )
+    cowl_inner_end = (
+        lip[0] + duct_length_factor * h_c * dir_n[0],
+        lip[1] + duct_length_factor * h_c * dir_n[1],
+    )
+
+    ramp_polyline = list(geom.ramp_points) + [ramp_duct_end]
+
+    full_loop = (
+        [inlet_bottom, inlet_top_H, farfield_top_end, lip, cowl_inner_end, ramp_duct_end]
+        + list(reversed(geom.ramp_points[:-1]))
+        + [tip, inlet_bottom]
+    )
+    closure_gap = math.hypot(
+        full_loop[0][0] - full_loop[-1][0], full_loop[0][1] - full_loop[-1][1]
+    )
+    if closure_gap > 1e-9:
+        raise ValueError(f"off-design CFD domain outline does not close (gap={closure_gap})")
+
+    boundaries = [
+        ("INLET", [inlet_bottom, inlet_top_H]),
+        ("FARFIELD_TOP", [inlet_top_H, farfield_top_end]),
+        ("OUTLET_EXT", [farfield_top_end, lip]),
+        ("COWL", [cowl_inner_end, lip]),
+        ("OUTLET", [ramp_duct_end, cowl_inner_end]),
+        ("RAMP", ramp_polyline),
+        ("SYMMETRY", [inlet_bottom, tip]),
+    ]
+
+    doc = ezdxf.new(dxfversion="R2010")
+    doc.header["$INSUNITS"] = 4
+    msp = doc.modelspace()
+
+    layer_colors = {
+        "INLET": 1,
+        "FARFIELD_TOP": 4,
+        "OUTLET_EXT": 3,
+        "COWL": 5,
+        "OUTLET": 3,
+        "RAMP": 7,
+        "SYMMETRY": 2,
     }
     for name, color in layer_colors.items():
         doc.layers.add(name, color=color)

@@ -20,6 +20,7 @@ from . import inlet as _inlet
 from .cfd_domain import export_cfd_domain_dxf
 from .export import export_dxf
 from .geometry import design_inlet
+from .offdesign import off_design
 from .optimize import optimize_equal_strength
 from .plotting import _BG_COLOR, _RAMP_COLOR, save_inlet_plot
 
@@ -183,6 +184,91 @@ def _handle_cfd_domain(args):
     return 0
 
 
+def _handle_offdesign(args):
+    if args.design_mach <= 1:
+        raise CliError("design-mach must be > 1")
+    if args.ramps < 0:
+        raise CliError("ramps must be >= 0")
+    for M in args.mach:
+        if M <= 1:
+            raise CliError("mach must be > 1")
+
+    geom = design_inlet(args.design_mach, args.ramps, capture_height=args.capture_height)
+
+    results = []
+    for M in args.mach:
+        try:
+            results.append(off_design(geom, M))
+        except ValueError as exc:
+            print(f"M={M}: detached, skipped ({exc})", file=sys.stderr)
+
+    header = (
+        f"{'M_inf':>8} {'regime':>14} {'dx/h_c':>24} {'A0/Ac':>10} "
+        f"{'rec_obl':>10} {'M_duct':>10} {'rec_tot':>10}  warnings"
+    )
+    print(header)
+    for r in results:
+        dx_str = ",".join(f"{d:.4f}" for d in r.dx_over_hc)
+        warn_str = "; ".join(r.warnings)
+        print(
+            f"{r.M_inf:>8.3f} {r.regime:>14} {dx_str:>24} {r.mass_capture_ratio:>10.4f} "
+            f"{r.recovery_oblique:>10.4f} {r.M_duct:>10.4f} {r.recovery_total:>10.4f}  {warn_str}"
+        )
+
+    if args.json:
+        out_dir = os.path.dirname(args.json)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        data = [
+            {
+                "M_inf": r.M_inf,
+                "regime": r.regime,
+                "dx_over_hc": r.dx_over_hc,
+                "mass_capture_ratio": r.mass_capture_ratio,
+                "recovery_oblique": r.recovery_oblique,
+                "M_duct": r.M_duct,
+                "recovery_total": r.recovery_total,
+                "warnings": r.warnings,
+            }
+            for r in results
+        ]
+        with open(args.json, "w") as f:
+            json.dump(data, f, indent=2)
+
+    if args.plot:
+        out_dir = os.path.dirname(args.plot)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+        fig.patch.set_facecolor(_BG_COLOR)
+
+        machs = [r.M_inf for r in results]
+        capture = [r.mass_capture_ratio for r in results]
+        rec_obl = [r.recovery_oblique for r in results]
+        rec_tot = [r.recovery_total for r in results]
+
+        ax1.set_facecolor(_BG_COLOR)
+        ax1.plot(machs, capture, color=_RAMP_COLOR, linewidth=1.2, marker="o")
+        ax1.axvline(args.design_mach, color="grey", linestyle="--", linewidth=0.8)
+        ax1.set_ylabel("A0/Ac")
+        ax1.grid(True, alpha=0.3)
+
+        ax2.set_facecolor(_BG_COLOR)
+        ax2.plot(machs, rec_obl, linewidth=1.2, marker="o", label="oblique only")
+        ax2.plot(machs, rec_tot, linewidth=1.2, marker="o", label="total")
+        ax2.axvline(args.design_mach, color="grey", linestyle="--", linewidth=0.8)
+        ax2.set_xlabel("M∞")
+        ax2.set_ylabel("$\\pi_d$ = p02/p01")
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+
+        fig.savefig(args.plot, dpi=200, facecolor=fig.get_facecolor())
+        plt.close(fig)
+
+    return 0
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="inletdesign")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -212,6 +298,17 @@ def build_parser():
     cfd_domain_parser.add_argument("--capture-height", type=float, default=1.0)
     cfd_domain_parser.add_argument("--out", type=str, default="results/cfd_domain")
     cfd_domain_parser.set_defaults(handler=_handle_cfd_domain)
+
+    offdesign_parser = subparsers.add_parser(
+        "offdesign", help="evaluate a fixed inlet geometry at other freestream Mach numbers"
+    )
+    offdesign_parser.add_argument("--design-mach", type=float, required=True)
+    offdesign_parser.add_argument("--ramps", type=int, required=True)
+    offdesign_parser.add_argument("--capture-height", type=float, default=1.0)
+    offdesign_parser.add_argument("--mach", type=float, nargs="+", required=True)
+    offdesign_parser.add_argument("--json", type=str, default=None)
+    offdesign_parser.add_argument("--plot", type=str, default=None)
+    offdesign_parser.set_defaults(handler=_handle_offdesign)
 
     return parser
 

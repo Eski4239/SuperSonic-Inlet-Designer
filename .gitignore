@@ -55,3 +55,7 @@ results/
 *.wbpz
 cfd/**/.*.backup/
 cfd/**/*_files/
+# Fluent side files
+*.ip
+**/.flwb_report_files/
+cfd/*-rfile.out

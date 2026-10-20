@@ -51,8 +51,6 @@ rather than any real separation or recirculation.
 - `docs/fig_3a_mach_full.png` — full-domain Mach contour.
 - `docs/fig_3a_mach_lip_mesh.png` — close-up of the Mach field and mesh near the cowl lip.
 
-**Note:** neither file currently exists in `docs/` — these links are placeholders pending the
-actual exported images from Fluent/CFD-Post.
 
 ## Next steps
 

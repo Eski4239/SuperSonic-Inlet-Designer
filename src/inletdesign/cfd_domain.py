@@ -12,7 +12,7 @@ Two exporters:
   here would need a large incidence angle (>= the cowl's own flow-turning
   angle) that would itself detach at the design Mach. This external region
   is only valid while the first ramp shock stays attached and crosses
-  x = lip.x below the far-field top boundary (i.e. exits through OUTLET_EXT,
+  OUTLET_EXT below the far-field top boundary (i.e. exits through OUTLET_EXT,
   not FARFIELD_TOP) -- callers evaluating very low M_inf should check this
   with offdesign.off_design() first.
 """
@@ -102,7 +102,9 @@ def export_cfd_domain_dxf(geom, path, duct_length_factor=2.0):
     return path
 
 
-def export_offdesign_domain_dxf(geom, path, duct_length_factor=2.0, top_height_factor=2.0):
+def export_offdesign_domain_dxf(
+    geom, path, duct_length_factor=2.0, top_height_factor=2.0, ext_outlet="normal"
+):
     """Write a closed 2D fluid-domain outline including an external spill region.
 
     See the module docstring for the rationale (no outer cowl surface, and
@@ -110,9 +112,26 @@ def export_offdesign_domain_dxf(geom, path, duct_length_factor=2.0, top_height_f
 
     Layers: INLET, FARFIELD_TOP, OUTLET_EXT, COWL, OUTLET, RAMP, SYMMETRY.
 
+    ext_outlet selects the shape of OUTLET_EXT:
+    - "normal" (default): a straight line from the lip, up and upstream, at
+      angle phi_cowl + 90 deg from +x, until y = H. It is normal to the
+      turned flow direction (33.8 deg for the M3 / 2-ramp design), so the
+      normal Mach M*cos(phi_flow - phi_cowl) across it is supersonic for all
+      attached-shock cases (M 2.5-3.5) and the result does not depend on the
+      boundary condition imposed there.
+    - "vertical": the previous shape, x = lip.x from the lip to y = H. Kept
+      for reference.
+
+    Closed loop: inlet_bottom -> (inlet_x, H) -> (x_ext_top, H) -> lip ->
+    cowl_inner_end -> ramp_duct_end -> ramp points reversed -> tip -> inlet_bottom.
+
     Raises:
-        ValueError: if the resulting loop does not close (1e-9 tolerance).
+        ValueError: if ext_outlet is not "normal"/"vertical", if H <= lip.y,
+            if x_ext_top <= inlet_x, or if the loop does not close (1e-9 tolerance).
     """
+    if ext_outlet not in ("normal", "vertical"):
+        raise ValueError(f"ext_outlet must be 'normal' or 'vertical', got {ext_outlet!r}")
+
     h_c = geom.capture_height
     tip = geom.ramp_points[0]
     terminal_foot = geom.ramp_points[-1]
@@ -124,8 +143,20 @@ def export_offdesign_domain_dxf(geom, path, duct_length_factor=2.0, top_height_f
     inlet_x = tip[0] - 1.0 * h_c
     inlet_bottom = (inlet_x, 0.0)
     inlet_top_H = (inlet_x, H)
-    x_lip = lip[0]
-    farfield_top_end = (x_lip, H)
+    if H <= lip[1]:
+        raise ValueError(f"far-field top H={H} must be above the lip (y={lip[1]})")
+
+    if ext_outlet == "vertical":
+        farfield_top_end = (lip[0], H)
+    else:
+        a = math.radians(phi_n + 90.0)
+        t = (H - lip[1]) / math.sin(a)
+        farfield_top_end = (lip[0] + t * math.cos(a), H)
+        if farfield_top_end[0] <= inlet_x:
+            raise ValueError(
+                f"OUTLET_EXT top x={farfield_top_end[0]} is not downstream of the inlet "
+                f"(x={inlet_x}); reduce top_height_factor"
+            )
 
     ramp_duct_end = (
         terminal_foot[0] + duct_length_factor * h_c * dir_n[0],
@@ -152,7 +183,10 @@ def export_offdesign_domain_dxf(geom, path, duct_length_factor=2.0, top_height_f
     boundaries = [
         ("INLET", [inlet_bottom, inlet_top_H]),
         ("FARFIELD_TOP", [inlet_top_H, farfield_top_end]),
-        ("OUTLET_EXT", [farfield_top_end, lip]),
+        (
+            "OUTLET_EXT",
+            [farfield_top_end, lip] if ext_outlet == "vertical" else [lip, farfield_top_end],
+        ),
         ("COWL", [cowl_inner_end, lip]),
         ("OUTLET", [ramp_duct_end, cowl_inner_end]),
         ("RAMP", ramp_polyline),

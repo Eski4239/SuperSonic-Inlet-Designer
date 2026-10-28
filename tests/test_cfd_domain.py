@@ -111,7 +111,7 @@ def test_offdesign_loop_closes(M_inf, n_ramps, tmp_path):
     geom = design_inlet(M_inf, n_ramps, capture_height=0.1)
     path = tmp_path / "offdesign.dxf"
 
-    export_offdesign_domain_dxf(geom, str(path))
+    export_offdesign_domain_dxf(geom, str(path), ext_outlet="vertical")
 
     full_loop = _offdesign_loop(geom)
     gap = math.hypot(full_loop[0][0] - full_loop[-1][0], full_loop[0][1] - full_loop[-1][1])
@@ -135,7 +135,7 @@ def test_offdesign_farfield_top_and_outlet_ext_positions(tmp_path):
     x_lip = geom.lip[0]
 
     path = tmp_path / "offdesign.dxf"
-    export_offdesign_domain_dxf(geom, str(path))
+    export_offdesign_domain_dxf(geom, str(path), ext_outlet="vertical")
     doc = ezdxf.readfile(str(path))
     msp = doc.modelspace()
 
@@ -224,3 +224,176 @@ def test_cli_cfd_domain_offdesign_smoke(tmp_path):
     assert out.with_suffix(".dxf").exists()
     offdesign_path = out.parent / f"{out.name}_offdesign.dxf"
     assert offdesign_path.exists()
+
+
+# --- Phase 3d-2b: OUTLET_EXT normal to the cowl direction -------------------
+
+OFFDESIGN_MACHS = [2.5, 2.75, 3.0, 3.25, 3.5]
+
+
+def _normal_ext_top(geom, H):
+    a = math.radians(geom.cowl_angle_deg + 90.0)
+    t = (H - geom.lip[1]) / math.sin(a)
+    return (geom.lip[0] + t * math.cos(a), H)
+
+
+def _single_layer_line(msp, layer):
+    lines = [e for e in msp if e.dxftype() == "LINE" and e.dxf.layer == layer]
+    assert len(lines) == 1
+    return lines[0]
+
+
+def _shock_march(geom, M_inf):
+    """Return [(M, flow_angle_deg)] for freestream and behind each ramp shock, plus betas."""
+    states = [(M_inf, 0.0)]
+    betas = []
+    M, phi = M_inf, 0.0
+    for theta in geom.ramp_angles_deg:
+        state = obl.oblique_shock_state(M, theta, weak=True)
+        betas.append(state["beta"])
+        M = state["M2"]
+        phi += theta
+        states.append((M, phi))
+    return states, betas
+
+
+@pytest.mark.parametrize("M_inf, n_ramps", [(3.0, 2), (2.0, 1), (4.0, 3)])
+def test_offdesign_normal_loop_layers_and_direction(M_inf, n_ramps, tmp_path):
+    geom = design_inlet(M_inf, n_ramps, capture_height=0.1)
+    H = 2.0 * geom.capture_height
+    path = tmp_path / "offdesign_normal.dxf"
+    export_offdesign_domain_dxf(geom, str(path))  # default is "normal"
+
+    doc = ezdxf.readfile(str(path))
+    layer_names = {layer.dxf.name for layer in doc.layers}
+    assert EXPECTED_OFFDESIGN_LAYERS <= layer_names
+    msp = doc.modelspace()
+
+    # Loop closes (independent recomputation).
+    inlet_x = geom.ramp_points[0][0] - geom.capture_height
+    loop = _offdesign_loop(geom)
+    loop[2] = _normal_ext_top(geom, H)
+    gap = math.hypot(loop[0][0] - loop[-1][0], loop[0][1] - loop[-1][1])
+    assert gap < 1e-9
+    assert loop[2][0] > inlet_x
+
+    # OUTLET_EXT starts at the lip, points at cowl_angle + 90 deg, ends at y = H.
+    line = _single_layer_line(msp, "OUTLET_EXT")
+    start = (line.dxf.start[0] / 1000.0, line.dxf.start[1] / 1000.0)
+    end = (line.dxf.end[0] / 1000.0, line.dxf.end[1] / 1000.0)
+    assert start[0] == pytest.approx(geom.lip[0], abs=1e-9)
+    assert start[1] == pytest.approx(geom.lip[1], abs=1e-9)
+    assert end[1] == pytest.approx(H, abs=1e-9)
+    angle = math.degrees(math.atan2(end[1] - start[1], end[0] - start[0]))
+    assert angle == pytest.approx(geom.cowl_angle_deg + 90.0, abs=1e-9)
+
+    # FARFIELD_TOP runs from the inlet top to the OUTLET_EXT end point.
+    ff = _single_layer_line(msp, "FARFIELD_TOP")
+    assert ff.dxf.start[0] / 1000.0 == pytest.approx(inlet_x, abs=1e-9)
+    assert ff.dxf.end[0] / 1000.0 == pytest.approx(end[0], abs=1e-9)
+    assert ff.dxf.end[1] / 1000.0 == pytest.approx(H, abs=1e-9)
+
+
+@pytest.mark.parametrize("M_inf", OFFDESIGN_MACHS)
+def test_offdesign_normal_shock1_crosses_outlet_ext(M_inf):
+    geom = design_inlet(3.0, 2, capture_height=1.0)
+    H = 2.0 * geom.capture_height
+    _, betas = _shock_march(geom, M_inf)
+
+    p0 = np.array(geom.ramp_points[0])
+    d_shock = np.array([math.cos(math.radians(betas[0])), math.sin(math.radians(betas[0]))])
+    lip = np.array(geom.lip)
+    top = np.array(_normal_ext_top(geom, H))
+    d_ext = top - lip
+
+    # Solve p0 + s*d_shock = lip + u*d_ext.
+    s, u = np.linalg.solve(np.column_stack([d_shock, -d_ext]), lip - p0)
+    y_cross = p0[1] + s * d_shock[1]
+    assert s > 0
+    assert y_cross < H  # never reaches FARFIELD_TOP
+    if M_inf < 3.0:
+        # Spillage: shock 1 passes above the lip and exits through OUTLET_EXT.
+        assert 0.0 < u <= 1.0
+    else:
+        # At/above design Mach shock 1 hits the lip or enters below it (inside the cowl).
+        assert u <= 1e-9
+
+
+@pytest.mark.parametrize("M_inf", OFFDESIGN_MACHS)
+def test_offdesign_normal_mach_across_outlet_ext_is_supersonic(M_inf):
+    geom = design_inlet(3.0, 2, capture_height=1.0)
+    states, _ = _shock_march(geom, M_inf)
+    assert len(states) == 3  # freestream, behind shock 1, behind shock 2
+    for M, phi in states:
+        M_normal = M * math.cos(math.radians(phi - geom.cowl_angle_deg))
+        assert M_normal > 1.0, (M_inf, M, phi, M_normal)
+
+
+def test_offdesign_vertical_reproduces_previous_file(tmp_path):
+    geom = design_inlet(3.0, 2, capture_height=0.1)
+    path = tmp_path / "offdesign_vertical.dxf"
+    export_offdesign_domain_dxf(geom, str(path), ext_outlet="vertical")
+    doc = ezdxf.readfile(str(path))
+
+    # Byte equality is impossible (ezdxf writes a timestamp and random GUID), so
+    # compare every entity against the pre-3d-2b construction.
+    loop = _offdesign_loop(geom)
+    inlet_bottom, inlet_top_H, farfield_top_end, lip, cowl_inner_end, ramp_duct_end = loop[:6]
+    expected = [
+        ("INLET", [inlet_bottom, inlet_top_H]),
+        ("FARFIELD_TOP", [inlet_top_H, farfield_top_end]),
+        ("OUTLET_EXT", [farfield_top_end, lip]),
+        ("COWL", [cowl_inner_end, lip]),
+        ("OUTLET", [ramp_duct_end, cowl_inner_end]),
+        ("RAMP", list(geom.ramp_points) + [ramp_duct_end]),
+        ("SYMMETRY", [inlet_bottom, geom.ramp_points[0]]),
+    ]
+    entities = list(doc.modelspace())
+    assert len(entities) == len(expected)
+    for entity, (layer, points) in zip(entities, expected):
+        assert entity.dxf.layer == layer
+        pts_mm = [(p[0] * 1000.0, p[1] * 1000.0) for p in points]
+        if len(points) == 2:
+            assert entity.dxftype() == "LINE"
+            got = [tuple(entity.dxf.start)[:2], tuple(entity.dxf.end)[:2]]
+        else:
+            assert entity.dxftype() == "LWPOLYLINE"
+            got = [tuple(p) for p in entity.get_points("xy")]
+        assert got == pts_mm
+
+    expected_colors = {
+        "INLET": 1, "FARFIELD_TOP": 4, "OUTLET_EXT": 3, "COWL": 5,
+        "OUTLET": 3, "RAMP": 7, "SYMMETRY": 2,
+    }
+    for name, color in expected_colors.items():
+        assert doc.layers.get(name).color == color
+
+
+def test_offdesign_invalid_ext_outlet_raises(tmp_path):
+    geom = design_inlet(3.0, 2, capture_height=0.1)
+    with pytest.raises(ValueError):
+        export_offdesign_domain_dxf(geom, str(tmp_path / "x.dxf"), ext_outlet="slanted")
+
+
+def test_offdesign_normal_ext_top_upstream_of_inlet_raises(tmp_path):
+    geom = design_inlet(3.0, 2, capture_height=0.1)
+    with pytest.raises(ValueError):
+        export_offdesign_domain_dxf(geom, str(tmp_path / "x.dxf"), top_height_factor=100.0)
+
+
+@pytest.mark.parametrize("extra", [[], ["--ext-outlet", "normal"], ["--ext-outlet", "vertical"]])
+def test_cli_cfd_domain_offdesign_ext_outlet(extra, tmp_path):
+    out = tmp_path / "m3"
+    code = main(
+        [
+            "cfd-domain", "--mach", "3", "--ramps", "2",
+            "--capture-height", "1.0", "--out", str(out), "--offdesign",
+        ]
+        + extra
+    )
+    assert code == 0
+    doc = ezdxf.readfile(str(out.parent / f"{out.name}_offdesign.dxf"))
+    line = _single_layer_line(doc.modelspace(), "OUTLET_EXT")
+    vertical = extra == ["--ext-outlet", "vertical"]
+    is_vertical = abs(line.dxf.start[0] - line.dxf.end[0]) < 1e-6
+    assert is_vertical == vertical

@@ -183,7 +183,12 @@ def _handle_cfd_domain(args):
 
     if args.offdesign:
         offdesign_path = f"{args.out}_offdesign.dxf"
-        export_offdesign_domain_dxf(geom, offdesign_path, top_height_factor=args.top_height_factor)
+        export_offdesign_domain_dxf(
+            geom,
+            offdesign_path,
+            top_height_factor=args.top_height_factor,
+            ext_outlet=args.ext_outlet,
+        )
         print(f"wrote {offdesign_path}")
 
     return 0
@@ -304,6 +309,9 @@ def build_parser():
     cfd_domain_parser.add_argument("--out", type=str, default="results/cfd_domain")
     cfd_domain_parser.add_argument("--offdesign", action="store_true")
     cfd_domain_parser.add_argument("--top-height-factor", type=float, default=2.0)
+    cfd_domain_parser.add_argument(
+        "--ext-outlet", choices=["normal", "vertical"], default="normal"
+    )
     cfd_domain_parser.set_defaults(handler=_handle_cfd_domain)
 
     offdesign_parser = subparsers.add_parser(

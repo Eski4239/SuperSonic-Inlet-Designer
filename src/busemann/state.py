@@ -1,8 +1,9 @@
 """Single application state: inputs, latest results, and the debounced recompute pipeline.
 
 Views change inputs through AppState.update() and listen to its signals; they never call
-the core. Freestream is cheap and computed on the UI thread; design (~150-300 ms, the
-Oswatitsch optimiser) runs on a worker thread. Only the newest request's result is used.
+the core. Freestream is cheap (< 1 ms) and computed on the UI thread; design (~13 ms for the
+Oswatitsch optimiser) and the optional off-design point run on a worker thread so the UI
+never blocks. Only the newest request's result is used (generation counter).
 """
 import dataclasses
 import time
@@ -29,6 +30,7 @@ class Inputs:
     capture_height_m: float = 0.1
     units: str = "SI"                   # "SI" | "Imperial"
     preset: str = None                  # name of the applied preset, None once edited
+    off_design_mach: float = None       # evaluate the frozen design at this Mach (M4 slider)
 
 
 # Fields that do not change any computed result.
@@ -36,7 +38,8 @@ _DISPLAY_ONLY = {"units", "preset"}
 
 
 class _WorkerSignals(QObject):
-    done = Signal(int, object, object, float)   # generation, DesignResult|None, error|None, ms
+    # generation, DesignResult|None, error|None, OffDesignResult|None, off error|None, ms
+    done = Signal(int, object, object, object, object, float)
 
 
 class _DesignJob(QRunnable):
@@ -47,7 +50,7 @@ class _DesignJob(QRunnable):
 
     def run(self):
         if self.generation != self.state._generation:   # superseded while queued: skip work
-            self.signals.done.emit(self.generation, None, None, 0.0)
+            self.signals.done.emit(self.generation, None, None, None, None, 0.0)
             return
         i = self.inputs
         t0 = time.perf_counter()
@@ -59,7 +62,13 @@ class _DesignJob(QRunnable):
             error = None
         except ValueError as exc:
             result, error = None, str(exc)
-        self.signals.done.emit(self.generation, result, error,
+        off, off_error = None, None
+        if result is not None and i.off_design_mach is not None:
+            try:
+                off = api.off_design_point(result, i.off_design_mach)
+            except ValueError as exc:
+                off_error = str(exc)
+        self.signals.done.emit(self.generation, result, error, off, off_error,
                                (time.perf_counter() - t0) * 1000.0)
 
 
@@ -77,6 +86,8 @@ class AppState(QObject):
         self.freestream_error = None
         self.design = None
         self.design_error = None
+        self.off_design = None
+        self.off_design_error = None
         self.compute_ms = None
         self._fs_ms = 0.0
         self._generation = 0
@@ -146,11 +157,12 @@ class AppState(QObject):
         self._set_busy(True)
         self._pool.start(job)
 
-    def _on_design_done(self, generation, result, error, ms):
+    def _on_design_done(self, generation, result, error, off, off_error, ms):
         self._jobs.pop(generation, None)
         if generation != self._generation:
             return
         self.design, self.design_error = result, error
+        self.off_design, self.off_design_error = off, off_error
         self.compute_ms = self._fs_ms + ms
         self._set_busy(False)
         self.design_ready.emit(result, error)

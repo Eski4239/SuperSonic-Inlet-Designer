@@ -24,7 +24,8 @@ FONT_UI_FALLBACK = "Segoe UI"
 FONT_MONO_FALLBACK = "Consolas"
 
 SIZE_BASE = 13       # px
-SIZE_LABEL = 11      # px, small caps
+SIZE_LABEL = 11      # px, uppercase labels
+LABEL_TRACKING_EM = 0.06
 SIZE_KPI = 22        # px
 
 LEFT_PANEL_WIDTH = 300
@@ -37,3 +38,14 @@ DEBOUNCE_MS = 30
 def space(n=1):
     """n grid units in px."""
     return n * SPACING
+
+
+# --- inlet canvas ---------------------------------------------------------------------
+# Sequential Mach tint, light (low M) -> darker blue (high M); low saturation so that the
+# drawing stays readable on top. Interpolated linearly between the stops.
+MACH_RAMP = ("#F7F9FC", "#EBF1F8", "#DDE7F3", "#CEDCEE", "#BFD1E8", "#AFC5E2", "#9FB9DB")
+REGION_ALPHA = 0.9
+CANVAS_ANIM_MS = 150
+HOVER_PICK_PX = 6        # shock pick distance, screen px
+CANVAS_FIT_MARGIN_PX = 56
+SHADOW_ALPHA = 28        # hover card shadow (0-255), subtle

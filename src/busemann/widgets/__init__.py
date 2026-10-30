@@ -11,14 +11,14 @@ from .segmented import SegmentedControl
 
 
 def section_title(text):
-    label = QLabel(text)
+    label = QLabel(theme.caps(text))
     label.setObjectName("sectionTitle")
     label.setFont(theme.label_font(QFont.Weight.DemiBold))
     return label
 
 
 def field_label(text, tooltip=""):
-    label = QLabel(text)
+    label = QLabel(theme.caps(text))
     label.setObjectName("fieldLabel")
     label.setFont(theme.label_font())
     label.setToolTip(tooltip)

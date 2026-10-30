@@ -1,6 +1,6 @@
-"""Results panel (right): KPI cards and the warnings list. Region table arrives in M4."""
+"""Results panel (right): KPI cards, warnings, and the canvas selection. Region table in M4."""
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from inletdesign import units as _units
 
@@ -8,6 +8,9 @@ from .. import theme
 from ..theme import tokens
 from ..widgets import KpiCard, section_title
 from . import format as fmt
+from .rows import region_rows, shock_rows
+
+SELECTION_HINT = "Click a region or shock on the canvas to inspect it."
 
 
 class ResultsPanel(QWidget):
@@ -47,6 +50,22 @@ class ResultsPanel(QWidget):
             layout.addWidget(card)
         layout.addSpacing(tokens.space(1))
         layout.addWidget(self.warnings_box)
+        layout.addSpacing(tokens.space(1))
+        layout.addWidget(section_title("Selection"))
+        self.selection_title = QLabel(SELECTION_HINT)
+        self.selection_title.setObjectName("selectionHint")
+        self.selection_title.setWordWrap(True)
+        self.selection_box = QWidget()
+        self._selection_grid = QGridLayout(self.selection_box)
+        self._selection_grid.setContentsMargins(0, 0, 0, 0)
+        self._selection_grid.setHorizontalSpacing(tokens.space(1))
+        self._selection_grid.setVerticalSpacing(4)
+        self._selection_grid.setColumnStretch(1, 1)
+        self._selection_widgets = []
+        self.selection_values = {}
+        self._selection = (None, None, None)
+        layout.addWidget(self.selection_title)
+        layout.addWidget(self.selection_box)
         layout.addStretch(1)
 
         state.design_ready.connect(lambda *_: self.refresh())
@@ -80,6 +99,8 @@ class ResultsPanel(QWidget):
                 fmt.sig(_units.to_display(mdot, "mass_flow_per_span", system), 4),
                 _units.unit_label("mass_flow_per_span", system))
         self._set_warnings(self.state.warnings())
+        if self._selection[0] is not None:       # dimensional values follow the unit system
+            self.show_selection(*self._selection)
 
     def _set_warnings(self, warnings):
         for row in self._warning_labels:
@@ -101,6 +122,46 @@ class ResultsPanel(QWidget):
             self._warnings_layout.addWidget(row)
             self._warning_labels.append(row)
         self.warnings_box.setVisible(bool(warnings))
+
+    # --- canvas selection ------------------------------------------------------------------
+    def show_selection(self, kind, index, payload):
+        self._selection = (kind, index, payload)
+        for w in self._selection_widgets:
+            w.deleteLater()
+        self._selection_widgets = []
+        self.selection_values = {}
+        if kind is None or payload is None:
+            self.selection_title.setObjectName("selectionHint")
+            self.selection_title.setText(SELECTION_HINT)
+            self._repolish(self.selection_title)
+            return
+        if kind == "region":
+            rows = region_rows(payload, self.state.freestream, self.state.inputs.units)
+        else:
+            rows = shock_rows(payload)
+        self.selection_title.setObjectName("hoverTitle")
+        self.selection_title.setText(payload.name[:1].upper() + payload.name[1:])
+        self._repolish(self.selection_title)
+        for r, (key, label, value, text, unit) in enumerate(rows):
+            self.selection_values[key] = value
+            name = QLabel(label)
+            name.setObjectName("readoutLabel")
+            val = QLabel(text)
+            val.setObjectName("readoutValue")
+            val.setFont(theme.mono_font())
+            val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            un = QLabel(unit)
+            un.setObjectName("readoutUnit")
+            un.setFont(theme.mono_font(tokens.SIZE_LABEL))
+            un.setMinimumWidth(tokens.space(7))
+            for c, w in enumerate((name, val, un)):
+                self._selection_grid.addWidget(w, r, c)
+                self._selection_widgets.append(w)
+
+    @staticmethod
+    def _repolish(widget):
+        widget.style().unpolish(widget)
+        widget.style().polish(widget)
 
     def warning_texts(self):
         return [row.findChild(QLabel, "warningRow").text() for row in self._warning_labels]

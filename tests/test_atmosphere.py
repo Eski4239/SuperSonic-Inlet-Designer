@@ -5,8 +5,7 @@ from inletdesign import atmosphere as atm
 
 # Layer-base values of the 1976 standard, at GEOPOTENTIAL altitude H.
 # SOURCE: U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562), Table 4 (defining
-# layer-base T_b, P_b) and Table I (density) -- page numbers TO CONFIRM.
-# UNCONFIRMED: entered from memory, awaiting user check against the document.
+# layer-base T_b, P_b) and Table I (density). Confirmed by the user, 2026-10-30.
 LAYER_BASES = [
     # H (m),  T (K),  p (Pa),     rho (kg/m^3)
     (0.0,     288.15, 101325.0,   1.2250),
@@ -17,14 +16,13 @@ LAYER_BASES = [
 ]
 
 # Spot values at GEOMETRIC altitude z.
-# SOURCE: U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562), Table I -- page TO CONFIRM.
-# UNCONFIRMED: entered from memory, awaiting user check against the document.
+# SOURCE: U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562), Table I. Confirmed by the
+# user, 2026-10-30.
 GEOMETRIC = [
-    # z (m),  T (K),   p (Pa),   rho (kg/m^3)
-    (11000.0, 216.774, 22699.9,  0.36480),
-    (20000.0, 216.650, 5529.3,   0.088910),
-    # 32 km row removed: my recalled T = 228.756 K contradicts the layer definition
-    # (H = 31.84 km lies in the 1 K/km layer -> 228.49 K). Re-add from the document.
+    # z (m),  T (K),   p (Pa),   rho (kg/m^3),  rel tol
+    (11000.0, 216.774, 22699.9,  0.36480,  1e-3),
+    (20000.0, 216.650, 5529.3,   0.088910, 1e-3),
+    (32000.0, 228.49,  889.06,   0.013555, 1e-4),
 ]
 
 
@@ -36,11 +34,11 @@ def test_layer_base_values(H, T, p, rho):
     assert atm.density(z) == pytest.approx(rho, rel=1e-3)
 
 
-@pytest.mark.parametrize("z, T, p, rho", GEOMETRIC)
-def test_geometric_table_values(z, T, p, rho):
-    assert atm.temperature(z) == pytest.approx(T, rel=1e-3)
-    assert atm.pressure(z) == pytest.approx(p, rel=1e-3)
-    assert atm.density(z) == pytest.approx(rho, rel=1e-3)
+@pytest.mark.parametrize("z, T, p, rho, rel", GEOMETRIC)
+def test_geometric_table_values(z, T, p, rho, rel):
+    assert atm.temperature(z) == pytest.approx(T, rel=rel)
+    assert atm.pressure(z) == pytest.approx(p, rel=rel)
+    assert atm.density(z) == pytest.approx(rho, rel=rel)
 
 
 def test_geopotential_round_trip():

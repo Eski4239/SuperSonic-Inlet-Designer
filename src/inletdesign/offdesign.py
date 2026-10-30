@@ -25,6 +25,8 @@ class OffDesignResult:
     M_duct: float
     recovery_total: float
     warnings: list
+    betas_deg: list = None            # off-design ramp shock angles (relative to local flow)
+    capture_streamline: list = None   # [(x, y), ...] upstream end first, ending at the lip
 
 
 def _side_of_line(point, origin, angle_deg):
@@ -129,6 +131,7 @@ def off_design(geom, M_inf, gamma=1.4):
         if np.sign(ref_side) != np.sign(lip_side):
             crossed_shocks.append(i)
 
+    streamline = [tuple(float(c) for c in lip)]
     if not crossed_shocks:
         mass_capture_ratio = 1.0
     else:
@@ -141,6 +144,7 @@ def off_design(geom, M_inf, gamma=1.4):
             ds = np.array([np.cos(shock_angle), np.sin(shock_angle)])
             result = _segment_intersection(point, d, origin, ds)
             point = result[0]
+            streamline.append(tuple(float(c) for c in point))
         mass_capture_ratio = point[1] / h_c
 
     ramp_states = _inlet.compress_ramps(M_inf, ramp_angles, gamma)
@@ -165,4 +169,6 @@ def off_design(geom, M_inf, gamma=1.4):
         M_duct=M_duct,
         recovery_total=recovery_total,
         warnings=warnings,
+        betas_deg=[float(b) for b in betas],
+        capture_streamline=streamline[::-1],
     )

@@ -22,7 +22,7 @@ QScrollArea { border: none; background: $surface; }
 #sectionTitle {
     font-size: ${size_label}px;
     font-weight: 600;
-    color: $text;
+    color: $text_muted;
     padding-top: ${s1}px;
 }
 
@@ -180,3 +180,25 @@ QScrollBar::handle:vertical { background: $border; border-radius: 3px; min-heigh
 QScrollBar::handle:vertical:hover { background: $text_muted; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+
+/* --- inlet canvas ---------------------------------------------------- */
+
+#hoverCard {
+    background: $surface;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+}
+#hoverTitle { font-weight: 600; color: $text; padding-bottom: 2px; }
+
+#canvasOverlay {
+    background: $surface;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+    padding: ${s1}px ${s2}px;
+    color: $text_muted;
+}
+#canvasOverlay[error="true"] { color: $error; border-color: $error; }
+
+#selectionHint { color: $text_muted; font-size: ${size_label}px; }
+QToolButton#layerToggle { padding: 4px ${s1}px; color: $text_muted; }
+QToolButton#layerToggle:checked { color: $text; }

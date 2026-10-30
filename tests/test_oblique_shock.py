@@ -73,3 +73,37 @@ def test_invalid_inputs_raise():
         obl.theta_from_beta(0.5, 20.0)
     with pytest.raises(ValueError):
         obl.beta_from_theta(2.0, 10.0, gamma=1.0)
+
+
+# --- closed-form solvers: self-consistency checks only, no reference values -----------------
+
+@pytest.mark.parametrize("M1", [1.05, 1.5, 2.0, 3.0, 5.0, 8.0])
+@pytest.mark.parametrize("gamma", [1.3, 1.4, 1.67])
+def test_closed_form_max_deflection_is_the_grid_maximum(M1, gamma):
+    theta_max, beta_at_max = obl.max_deflection(M1, gamma)
+    mu = np.degrees(np.arcsin(1.0 / M1))
+    grid = np.linspace(mu, 90.0, 200001)
+    theta = obl.theta_from_beta(M1, grid, gamma)
+    assert theta_max == pytest.approx(theta.max(), abs=1e-8)
+    assert theta_max >= theta.max() - 1e-12
+    assert beta_at_max == pytest.approx(grid[np.argmax(theta)], abs=1e-3)
+
+
+@pytest.mark.parametrize("M1", [1.2, 2.0, 3.0, 6.0])
+@pytest.mark.parametrize("frac", [0.01, 0.3, 0.7, 0.999])
+def test_cubic_roots_invert_theta_beta_m(M1, frac):
+    theta_max, beta_at_max = obl.max_deflection(M1)
+    theta = frac * theta_max
+    weak = obl.beta_from_theta(M1, theta, weak=True)
+    strong = obl.beta_from_theta(M1, theta, weak=False)
+    assert weak < beta_at_max < strong
+    assert obl.theta_from_beta(M1, weak) == pytest.approx(theta, abs=1e-9)
+    assert obl.theta_from_beta(M1, strong) == pytest.approx(theta, abs=1e-9)
+
+
+def test_max_deflection_accepts_arrays():
+    M = np.array([1.5, 2.0, 4.0])
+    theta_max, beta = obl.max_deflection(M)
+    assert theta_max.shape == (3,)
+    for i, m in enumerate(M):
+        assert theta_max[i] == pytest.approx(obl.max_deflection(float(m))[0])

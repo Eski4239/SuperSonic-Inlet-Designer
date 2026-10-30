@@ -61,6 +61,19 @@ class RegionState(_Serialisable):
 
 
 @dataclass(frozen=True)
+class ShockState(_Serialisable):
+    name: str
+    kind: str            # "oblique" or "normal"
+    beta_deg: float      # shock angle relative to the upstream flow
+    theta_deg: float     # flow deflection across the shock
+    M1: float            # upstream Mach number
+    Mn1: float           # upstream shock-normal Mach number, M1 sin(beta)
+    p2_p1: float         # static pressure ratio across the shock
+    p0_ratio: float      # p02 / p01 across the shock
+    p0_loss: float       # 1 - p02 / p01
+
+
+@dataclass(frozen=True)
 class DesignInputs(_Serialisable):
     M: float
     n_ramps: int
@@ -92,6 +105,7 @@ class DesignResult(_Serialisable):
     mass_capture: float
     geometry: DesignGeometry
     warnings: tuple
+    shock_states: tuple = ()  # ShockState per drawn shock: ramps, then the terminal one
 
 
 @dataclass(frozen=True)
@@ -104,6 +118,11 @@ class OffDesignResult(_Serialisable):
     M_duct: float
     recovery_total: float
     warnings: tuple
+    ramp_angles_deg: tuple = ()
+    betas_deg: tuple = ()
+    regions: tuple = ()             # RegionState at this Mach, freestream first
+    shock_states: tuple = ()        # ShockState per shock (terminal last, if present)
+    capture_streamline: tuple = ()  # ((x, y), ...) from the first crossed shock to the lip
 
 
 @dataclass(frozen=True)
@@ -207,6 +226,51 @@ def _validate_custom_angles(M, n_ramps, ramp_angles, gamma):
     return angles
 
 
+def _shock(name, kind, upstream, downstream, beta, theta):
+    return ShockState(
+        name=name, kind=kind, beta_deg=float(beta), theta_deg=float(theta),
+        M1=upstream.M, Mn1=float(upstream.M * math.sin(math.radians(beta))),
+        p2_p1=downstream.p_ratio / upstream.p_ratio,
+        p0_ratio=downstream.p0_ratio / upstream.p0_ratio,
+        p0_loss=1.0 - downstream.p0_ratio / upstream.p0_ratio,
+    )
+
+
+def _flow_states(M, angles, betas, flow, gamma):
+    """Region states (freestream first) and shock states for the ramps + terminal normal shock.
+
+    If the flow behind the last ramp is subsonic there is no terminal shock: the duct takes
+    that state and recovery_total = recovery_oblique.
+    Returns (regions, shocks, recovery_oblique, recovery_total, M_duct, subsonic).
+    """
+    ramp_states = _inlet.compress_ramps(M, list(angles), gamma)
+    regions = [RegionState("freestream", 0.0, None, float(M), 1.0, 1.0, 1.0)]
+    for i, st in enumerate(ramp_states):
+        regions.append(
+            RegionState(f"behind shock {i + 1}", float(flow[i + 1]), float(betas[i]),
+                        float(st.M), float(st.p_ratio), float(st.T_ratio), float(st.p0_ratio))
+        )
+    shocks = [_shock(f"ramp shock {i + 1}", "oblique", regions[i], regions[i + 1],
+                     betas[i], angles[i]) for i in range(len(angles))]
+    recovery_oblique = float(ramp_states[-1].p0_ratio) if ramp_states else 1.0
+    M_before_terminal = regions[-1].M
+
+    subsonic = M_before_terminal < 1.0
+    if subsonic:
+        recovery_total, M_duct = recovery_oblique, M_before_terminal
+    else:
+        terminal = _inlet.compress(M, list(angles), gamma)[-1]
+        recovery_total = float(terminal.p0_ratio)
+        M_duct = float(terminal.M)
+        regions.append(
+            RegionState("duct (behind normal shock)", float(flow[-1]), 90.0, M_duct,
+                        float(terminal.p_ratio), float(terminal.T_ratio), recovery_total)
+        )
+        shocks.append(_shock("terminal normal shock", "normal", regions[-2], regions[-1],
+                             90.0, 0.0))
+    return tuple(regions), tuple(shocks), recovery_oblique, recovery_total, M_duct, subsonic
+
+
 @lru_cache(maxsize=256)
 def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles):
     if ramp_angles is None:
@@ -225,29 +289,9 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles):
     for a in angles:
         flow.append(flow[-1] + a)
 
-    warnings = []
-    ramp_states = _inlet.compress_ramps(M, list(angles), gamma)
-    regions = [RegionState("freestream", 0.0, None, float(M), 1.0, 1.0, 1.0)]
-    for i, s in enumerate(ramp_states):
-        regions.append(
-            RegionState(f"behind shock {i + 1}", flow[i + 1], betas[i],
-                        float(s.M), float(s.p_ratio), float(s.T_ratio), float(s.p0_ratio))
-        )
-    recovery_oblique = float(ramp_states[-1].p0_ratio) if ramp_states else 1.0
-    M_before_terminal = float(ramp_states[-1].M) if ramp_states else float(M)
-
-    if M_before_terminal < 1.0:
-        warnings.append(SUBSONIC_WARNING)
-        recovery_total = recovery_oblique
-        M_duct = M_before_terminal
-    else:
-        terminal = _inlet.compress(M, list(angles), gamma)[-1]
-        recovery_total = float(terminal.p0_ratio)
-        M_duct = float(terminal.M)
-        regions.append(
-            RegionState("duct (behind normal shock)", flow[-1], 90.0, M_duct,
-                        float(terminal.p_ratio), float(terminal.T_ratio), recovery_total)
-        )
+    regions, shocks, recovery_oblique, recovery_total, M_duct, subsonic = _flow_states(
+        M, angles, betas, flow, gamma)
+    warnings = [SUBSONIC_WARNING] if subsonic else []
 
     geometry = DesignGeometry(
         ramp_points=tuple(_pt(p) for p in geom.ramp_points),
@@ -265,6 +309,7 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles):
         recovery_total=recovery_total, M_duct=M_duct,
         throat_height=float(geom.throat_height), cowl_angle_deg=float(geom.cowl_angle_deg),
         mass_capture=1.0, geometry=geometry, warnings=tuple(warnings),
+        shock_states=shocks,
     )
 
 
@@ -284,7 +329,9 @@ def design(M, n_ramps, capture_height=0.1, gamma=1.4, ramp_angles=None):
     angles = None
     if ramp_angles is not None:
         angles = _validate_custom_angles(M, n_ramps, ramp_angles, gamma)
-    return _design_cached(float(M), n_ramps, float(capture_height), float(gamma), angles)
+    # Round the cache key so float noise from sliders/unit conversions reuses entries.
+    return _design_cached(round(float(M), 10), n_ramps, round(float(capture_height), 12),
+                          round(float(gamma), 10), angles)
 
 
 def _geometry_of(design_result):
@@ -293,13 +340,19 @@ def _geometry_of(design_result):
                           gamma=i.gamma)
 
 
-def _convert_off(r):
+def _convert_off(r, design_result):
+    angles = tuple(float(a) for a in design_result.ramp_angles_deg)
+    betas = tuple(float(b) for b in r.betas_deg)
+    regions, shocks, *_ = _flow_states(float(r.M_inf), angles, betas,
+                                       design_result.flow_angles_deg, design_result.inputs.gamma)
     return OffDesignResult(
         M_inf=float(r.M_inf), regime=r.regime,
         dx_over_hc=tuple(float(d) for d in r.dx_over_hc),
         mass_capture_ratio=float(r.mass_capture_ratio),
         recovery_oblique=float(r.recovery_oblique), M_duct=float(r.M_duct),
         recovery_total=float(r.recovery_total), warnings=tuple(r.warnings),
+        ramp_angles_deg=angles, betas_deg=betas, regions=regions, shock_states=shocks,
+        capture_streamline=tuple(_pt(p) for p in r.capture_streamline),
     )
 
 
@@ -310,7 +363,7 @@ def off_design_point(design_result, M):
     """
     _check_mach(M)
     return _convert_off(_off.off_design(_geometry_of(design_result), float(M),
-                                        design_result.inputs.gamma))
+                                        design_result.inputs.gamma), design_result)
 
 
 def _attached(design_result, M):
@@ -353,7 +406,7 @@ def off_design_sweep(design_result, M_min, M_max, n):
     points = []
     for M in machs:
         try:
-            points.append(_convert_off(_off.off_design(geom, M, gamma)))
+            points.append(_convert_off(_off.off_design(geom, M, gamma), design_result))
         except ValueError as exc:
             if "shock detached" not in str(exc):
                 raise

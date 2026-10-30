@@ -1,0 +1,31 @@
+api.design(M=3, n_ramps=2, capture_height=0.1)  [20 km only sets the freestream; design is altitude-independent]
+median of 20 (cache bypassed): design = 120.9 ms, off_design_sweep(40 pts, M 2.0-3.5) = 49.3 ms
+
+         245871 function calls (245799 primitive calls) in 0.200 seconds
+
+   Ordered by: cumulative time
+   List reduced from 97 to 20 due to restriction <20>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.000    0.000    0.200    0.200 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\api.py:210(_design_cached)
+        1    0.000    0.000    0.198    0.198 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\geometry.py:118(design_inlet)
+        1    0.000    0.000    0.197    0.197 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\optimize.py:55(optimize_equal_strength)
+      207    0.000    0.000    0.197    0.001 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\optimize.py:69(recovery_for_Mn)
+      207    0.001    0.000    0.141    0.001 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\optimize.py:17(equal_strength_ramps)
+      453    0.002    0.000    0.135    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\oblique_shock.py:77(oblique_shock_state)
+      760    0.002    0.000    0.129    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\oblique_shock.py:40(max_deflection)
+  761/725    0.004    0.000    0.127    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\.venv\Lib\site-packages\scipy\optimize\_minimize.py:831(minimize_scalar)
+  761/725    0.042    0.000    0.121    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\.venv\Lib\site-packages\scipy\optimize\_optimize.py:2289(_minimize_scalar_bounded)
+      455    0.001    0.000    0.115    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\oblique_shock.py:56(beta_from_theta)
+    13257    0.035    0.000    0.099    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\oblique_shock.py:30(theta_from_beta)
+     8779    0.003    0.000    0.070    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\oblique_shock.py:45(neg_theta)
+    14472    0.020    0.000    0.070    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\oblique_shock.py:17(_validate)
+       90    0.000    0.000    0.057    0.001 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\inlet.py:40(compress)
+    18168    0.007    0.000    0.055    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\.venv\Lib\site-packages\numpy\_core\fromnumeric.py:2474(any)
+       91    0.001    0.000    0.054    0.001 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\src\inletdesign\inlet.py:9(compress_ramps)
+    18168    0.016    0.000    0.048    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\.venv\Lib\site-packages\numpy\_core\fromnumeric.py:86(_wrapreduction_any_all)
+      455    0.001    0.000    0.039    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\.venv\Lib\site-packages\scipy\optimize\_zeros_py.py:724(brentq)
+      455    0.002    0.000    0.037    0.000 {built-in method scipy.optimize._zeros._brentq}
+     4209    0.004    0.000    0.036    0.000 C:\Users\Usuario\Desktop\Projects\Propulsion Extra Project\.venv\Lib\site-packages\scipy\optimize\_zeros_py.py:106(f_raise)
+
+

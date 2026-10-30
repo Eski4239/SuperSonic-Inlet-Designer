@@ -1,4 +1,4 @@
-"""KPI card: small-caps title, large mono value, muted mono unit, optional sub-line."""
+"""KPI card: uppercase title, large mono value, muted mono unit, optional sub-line."""
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from .. import theme
@@ -13,7 +13,7 @@ class KpiCard(QFrame):
         self.setObjectName("kpiCard")
         self.setToolTip(tooltip)
 
-        self.title = QLabel(title)
+        self.title = QLabel(theme.caps(title))
         self.title.setObjectName("kpiTitle")
         self.title.setFont(theme.label_font())
         self.value_label = QLabel(EMPTY)

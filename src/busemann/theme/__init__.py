@@ -6,6 +6,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt
 from PySide6.QtGui import QFont, QFontDatabase, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from ..paths import resource_path
 from . import tokens
 
 _FONT_FILES = (
@@ -45,11 +46,16 @@ def ui_font(size=tokens.SIZE_BASE, weight=QFont.Weight.Normal):
 
 
 def label_font(weight=QFont.Weight.Medium):
-    """11 px small caps, for field labels and section titles (QSS cannot set small caps)."""
+    """11 px label font with 0.06 em tracking (QSS cannot set letter-spacing). Pair with caps()."""
     font = ui_font(tokens.SIZE_LABEL, weight)
-    font.setCapitalization(QFont.Capitalization.SmallCaps)
-    font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 104)
+    font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing,
+                          tokens.LABEL_TRACKING_EM * tokens.SIZE_LABEL)
     return font
+
+
+def caps(text):
+    """Uppercase label text, except labels containing symbols (θ1, p∞, γ): case carries meaning."""
+    return text if any(ord(c) > 127 for c in text) else text.upper()
 
 
 def mono_font(size=tokens.SIZE_BASE):
@@ -68,21 +74,11 @@ def stylesheet():
         size_base=tokens.SIZE_BASE, size_label=tokens.SIZE_LABEL, size_kpi=tokens.SIZE_KPI,
         radius=tokens.RADIUS, border_w=tokens.BORDER,
         s1=tokens.space(1), s2=tokens.space(2), s3=tokens.space(3),
-        chevron_down=_icon_file("chevron-down", "text_muted"),
+        # QSS url() needs a file: a copy pre-tinted with text_muted ships in resources/icons
+        # (a test keeps its colour equal to the token).
+        chevron_down=resource_path("icons", "chevron-down-muted.svg").as_posix(),
     )
     return Template(text).substitute(values)
-
-
-def _icon_file(name, color):
-    """Tinted copy of an icon written to a temp file, for QSS url() (QSS cannot read bytes)."""
-    import tempfile
-    from pathlib import Path
-
-    svg = _resource("icons", f"{name}.svg").read_text(encoding="utf-8")
-    svg = svg.replace("currentColor", tokens.COLORS[color])
-    path = Path(tempfile.gettempdir()) / f"busemann-{name}-{color}.svg"
-    path.write_text(svg, encoding="utf-8")
-    return path.as_posix()
 
 
 def _resource_text(*parts):

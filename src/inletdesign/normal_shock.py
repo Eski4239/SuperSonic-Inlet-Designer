@@ -9,9 +9,13 @@ import numpy as np
 
 
 def _validate(M1, gamma):
-    M1 = np.asarray(M1, dtype=float)
     if gamma <= 1.0:
         raise ValueError("gamma must be > 1")
+    if isinstance(M1, (int, float)):  # fast path for scalars (optimiser inner loop)
+        if not M1 >= 1.0:
+            raise ValueError("M1 must be >= 1 (normal shock requires supersonic upstream flow)")
+        return float(M1)
+    M1 = np.asarray(M1, dtype=float)
     if np.any(M1 < 1.0):
         raise ValueError("M1 must be >= 1 (normal shock requires supersonic upstream flow)")
     return M1

@@ -5,11 +5,11 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QLabel, QMainWindow, QProgressBar, QScrollArea, QTabWidget,
-    QToolBar, QVBoxLayout, QWidget,
+    QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from . import __version__, theme
-from .canvas import CanvasPlaceholder
+from .canvas import InletCanvas
 from .state import AppState
 from .theme import tokens
 from .views import DesignPanel, FlightPanel, ResultsPanel
@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
                                       self.flight_panel, self.design_panel)
         self.right_panel = _side_panel("rightPanel", tokens.RIGHT_PANEL_WIDTH, self.results_panel)
 
-        self.canvas = CanvasPlaceholder()
+        self.canvas = InletCanvas(self.state)
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(self.canvas, "Design")
@@ -68,6 +68,12 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self._build_status_bar()
+
+        # Transitions animate on discrete changes, not while the Mach slider is dragged.
+        slider = self.flight_panel.mach.slider
+        slider.sliderPressed.connect(lambda: self.canvas.set_animations_enabled(False))
+        slider.sliderReleased.connect(lambda: self.canvas.set_animations_enabled(True))
+        self.canvas.selection_changed.connect(self.results_panel.show_selection)
 
         self.state.busy_changed.connect(self.busy.setVisible)
         self.state.compute_time_changed.connect(lambda _ms: self._update_status())
@@ -91,6 +97,35 @@ class MainWindow(QMainWindow):
             action.setChecked(True)
             action.toggled.connect(panel.setVisible)
             bar.addAction(action)
+
+        bar.addSeparator()
+        self.zoom_in_action = QAction(theme.icon("zoom-in", "text"), "Zoom in", self)
+        self.zoom_in_action.setShortcut(QKeySequence.StandardKey.ZoomIn)
+        self.zoom_in_action.triggered.connect(self.canvas.zoom_in)
+        self.zoom_out_action = QAction(theme.icon("zoom-out", "text"), "Zoom out", self)
+        self.zoom_out_action.setShortcut(QKeySequence.StandardKey.ZoomOut)
+        self.zoom_out_action.triggered.connect(self.canvas.zoom_out)
+        self.fit_action = QAction(theme.icon("maximize", "text"), "Fit drawing (F)", self)
+        self.fit_action.triggered.connect(lambda: self.canvas.fit())
+        for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action):
+            bar.addAction(action)
+
+        bar.addSeparator()
+        self.layer_actions = {}
+        for name, label, on in (("shocks", "Shocks", True), ("regions", "Regions", True),
+                                ("dimensions", "Dimensions", False), ("grid", "Grid", False)):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setChecked(on)
+            action.setToolTip(f"Show {label.lower()} on the canvas")
+            action.toggled.connect(lambda v, n=name: self.canvas.set_layer_visible(n, v))
+            self.canvas.set_layer_visible(name, on)
+            button = QToolButton()
+            button.setObjectName("layerToggle")
+            button.setDefaultAction(action)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+            bar.addWidget(button)
+            self.layer_actions[name] = action
 
     def _build_status_bar(self):
         status = self.statusBar()

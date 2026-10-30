@@ -1,4 +1,4 @@
-"""Slider with a small-caps label and a live numeric field kept in sync."""
+"""Slider with an uppercase label and a live numeric field kept in sync."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
@@ -17,7 +17,7 @@ class LabeledSlider(QWidget):
         self._min, self._step = minimum, step
         steps = round((maximum - minimum) / step)
 
-        self.label = QLabel(label)
+        self.label = QLabel(theme.caps(label))
         self.label.setObjectName("fieldLabel")
         self.label.setFont(theme.label_font())
         self.field = NumberField(value, decimals, minimum, maximum, unit=unit)

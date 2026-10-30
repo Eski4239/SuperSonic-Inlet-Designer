@@ -34,4 +34,7 @@ busemann = [
 ]
 
 [tool.pytest.ini_options]
-markers = ["gui: GUI smoke tests (pytest-qt); skipped when PySide6 or a display is unavailable"]
+markers = [
+    "gui: GUI smoke tests (pytest-qt); skipped when PySide6 or a display is unavailable",
+    "perf: performance targets (median timings, generous limits)",
+]

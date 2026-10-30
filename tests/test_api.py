@@ -170,3 +170,36 @@ def test_sweep_performance_100_points():
     t0 = time.perf_counter()
     api.off_design_sweep(d, 2.0, 4.5, 100)
     assert time.perf_counter() - t0 < 0.5
+
+
+# --- shock states and off-design drawing data (M3) ------------------------------------
+
+def test_shock_states_consistent_with_regions():
+    d = api.design(3.0, 3)
+    assert [s.kind for s in d.shock_states] == ["oblique"] * 3 + ["normal"]
+    for i, s in enumerate(d.shock_states):
+        up, down = d.regions[i], d.regions[i + 1]
+        assert s.M1 == pytest.approx(up.M)
+        assert s.p2_p1 == pytest.approx(down.p_ratio / up.p_ratio)
+        assert s.p0_ratio * up.p0_ratio == pytest.approx(down.p0_ratio)
+        assert s.p0_loss == pytest.approx(1.0 - s.p0_ratio)
+        assert s.Mn1 == pytest.approx(up.M * math.sin(math.radians(s.beta_deg)))
+    assert d.shock_states[-1].Mn1 == pytest.approx(d.shock_states[-1].M1)
+
+
+def test_off_design_regions_and_streamline_serialise():
+    d = api.design(3.0, 2, capture_height=0.1)
+    r = api.off_design_point(d, 2.5)
+    json.dumps(r.to_dict())
+    assert len(r.regions) == 4 and len(r.shock_states) == 3
+    assert r.regions[-1].p0_ratio == pytest.approx(r.recovery_total)
+    assert r.capture_streamline[-1] == pytest.approx(d.geometry.lip)
+    assert r.capture_streamline[0][1] == pytest.approx(r.mass_capture_ratio * 0.1)
+
+
+def test_off_design_at_design_mach_reproduces_design_states():
+    d = api.design(3.0, 2)
+    r = api.off_design_point(d, 3.0)
+    for a, b in zip(r.regions, d.regions):
+        assert a.M == pytest.approx(b.M, rel=1e-9)
+    assert r.betas_deg == pytest.approx(d.betas_deg, abs=1e-9)

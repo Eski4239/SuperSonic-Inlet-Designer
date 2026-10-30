@@ -27,6 +27,7 @@ class Readout(QWidget):
             value.setObjectName("readoutValue")
             value.setFont(theme.mono_font())
             value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            value.setWordWrap(True)      # long angle lists (4 ramps) wrap instead of widening
             value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             unit = QLabel()
             unit.setObjectName("readoutUnit")

@@ -8,16 +8,21 @@ Mn1 = M1*sin(beta) and reusing the normal_shock relations on that component.
 Reference: NACA Report 1135, oblique shock relations (theta-beta-M chart).
 Notation: theta = flow deflection, beta = shock angle (NACA 1135 uses the reverse).
 """
+import math
+
 import numpy as np
-from scipy.optimize import brentq, minimize_scalar
 
 from . import normal_shock as ns
 
 
 def _validate(M1, gamma):
-    M1 = np.asarray(M1, dtype=float)
     if gamma <= 1.0:
         raise ValueError("gamma must be > 1")
+    if isinstance(M1, (int, float)):  # fast path: this module sits in the optimiser's inner loop
+        if not M1 >= 1.0:
+            raise ValueError("M1 must be >= 1 (oblique shock requires supersonic upstream flow)")
+        return float(M1)
+    M1 = np.asarray(M1, dtype=float)
     if np.any(M1 < 1.0):
         raise ValueError("M1 must be >= 1 (oblique shock requires supersonic upstream flow)")
     return M1
@@ -37,24 +42,50 @@ def theta_from_beta(M1, beta_deg, gamma=1.4):
     return np.degrees(np.arctan(tan_theta))
 
 
+def _beta_at_max_deg(M1, gamma):
+    """sin^2(beta*) = [(g+1)M^2 - 4 + sqrt((g+1)((g+1)M^4 + 8(g-1)M^2 + 16))] / (4 g M^2)
+    (closed form of d(theta)/d(beta) = 0)."""
+    M2 = M1 * M1
+    gp1 = gamma + 1.0
+    root = np.sqrt(gp1 * (gp1 * M2 * M2 + 8.0 * (gamma - 1.0) * M2 + 16.0))
+    sin2 = (gp1 * M2 - 4.0 + root) / (4.0 * gamma * M2)
+    return np.degrees(np.arcsin(np.sqrt(np.minimum(sin2, 1.0))))
+
+
 def max_deflection(M1, gamma=1.4):
-    """theta_max and the beta at which it occurs, found by maximizing theta_from_beta over beta."""
+    """theta_max and the beta at which it occurs: beta* in closed form, theta_max = theta_from_beta(beta*)."""
     M1 = _validate(M1, gamma)
-    mach_angle = float(_mach_angle_deg(M1))
-
-    def neg_theta(beta_deg):
-        return -theta_from_beta(M1, beta_deg, gamma)
-
-    result = minimize_scalar(
-        neg_theta, bounds=(mach_angle + 1e-9, 90.0 - 1e-9), method="bounded"
-    )
-    beta_at_max = float(result.x)
-    theta_max = float(-result.fun)
+    beta_at_max = _beta_at_max_deg(M1, gamma)
+    theta_max = theta_from_beta(M1, beta_at_max, gamma)
+    if np.ndim(M1) == 0:
+        return float(theta_max), float(beta_at_max)
     return theta_max, beta_at_max
 
 
+def _beta_cubic_deg(M1, theta_deg, gamma, weak):
+    """Root of the theta-beta-M cubic in tan(beta) (trigonometric form):
+    tan(beta) = [M^2 - 1 + 2 lam cos((4 pi d + acos(chi)) / 3)] / [3 (1 + (g-1)/2 M^2) tan(theta)],
+    lam = sqrt((M^2-1)^2 - 3 (1 + (g-1)/2 M^2)(1 + (g+1)/2 M^2) tan^2 theta),
+    chi = [(M^2-1)^3 - 9 (1 + (g-1)/2 M^2)(1 + (g-1)/2 M^2 + (g+1)/4 M^4) tan^2 theta] / lam^3,
+    d = 1 weak, d = 0 strong."""
+    M2 = M1 * M1
+    t = np.tan(np.radians(theta_deg))
+    a = 1.0 + 0.5 * (gamma - 1.0) * M2
+    b = 1.0 + 0.5 * (gamma + 1.0) * M2
+    lam = np.sqrt(np.maximum((M2 - 1.0) ** 2 - 3.0 * a * b * t * t, 0.0))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        chi = ((M2 - 1.0) ** 3 - 9.0 * a * (a + 0.25 * (gamma + 1.0) * M2 * M2) * t * t) / lam**3
+    chi = np.clip(np.nan_to_num(chi, nan=1.0), -1.0, 1.0)
+    delta = 1.0 if weak else 0.0
+    tan_beta = (M2 - 1.0 + 2.0 * lam * np.cos((4.0 * np.pi * delta + np.arccos(chi)) / 3.0)) / (
+        3.0 * a * t
+    )
+    return np.degrees(np.arctan(tan_beta))
+
+
 def beta_from_theta(M1, theta_deg, gamma=1.4, weak=True):
-    """Invert the theta-beta-M relation for beta, selecting the weak or strong root."""
+    """Invert the theta-beta-M relation for beta, selecting the weak or strong root
+    (analytic cubic in tan(beta), see _beta_cubic_deg)."""
     M1 = _validate(M1, gamma)
     theta_max, beta_at_max = max_deflection(M1, gamma)
     if theta_deg > theta_max:
@@ -65,13 +96,9 @@ def beta_from_theta(M1, theta_deg, gamma=1.4, weak=True):
     mach_angle = float(_mach_angle_deg(M1))
     if theta_deg <= 0.0:
         return mach_angle if weak else 90.0
-
-    def f(beta_deg):
-        return theta_from_beta(M1, beta_deg, gamma) - theta_deg
-
-    if weak:
-        return brentq(f, mach_angle, beta_at_max, xtol=1e-10)
-    return brentq(f, beta_at_max, 90.0, xtol=1e-10)
+    beta = float(_beta_cubic_deg(M1, theta_deg, gamma, weak))
+    # The two roots meet at theta_max; keep each on its own side of beta* against rounding.
+    return min(beta, beta_at_max) if weak else max(beta, beta_at_max)
 
 
 def oblique_shock_state(M1, theta_deg, gamma=1.4, weak=True):

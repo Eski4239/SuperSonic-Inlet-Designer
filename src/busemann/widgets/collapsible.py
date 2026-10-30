@@ -10,7 +10,7 @@ class CollapsibleSection(QWidget):
         super().__init__(parent)
         self.toggle = QToolButton()
         self.toggle.setObjectName("sectionToggle")
-        self.toggle.setText(title)
+        self.toggle.setText(theme.caps(title))
         self.toggle.setFont(theme.label_font())
         self.toggle.setCheckable(True)
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)

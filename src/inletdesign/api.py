@@ -136,8 +136,12 @@ class OffDesignResult(_Serialisable):
     capture_streamline: tuple = ()  # ((x, y), ...) from the first crossed shock to the lip
     cowl_angle_deg: float = None
     theta_max_freestream_deg: float = None
-    cowl_margin_deg: float = None
+    cowl_margin_deg: float = None   # local check at the lip; None: subsonic and aligned
     notices: tuple = ()
+    cowl_lip_region: int = None     # region containing the cowl lip (0 = freestream)
+    lip_mach: float = None
+    lip_flow_angle_deg: float = None
+    cowl_required_turn_deg: float = None   # cowl angle - lip flow angle; <= 0: no cowl shock
 
 
 @dataclass(frozen=True)
@@ -391,8 +395,11 @@ def _convert_off(r, design_result):
         capture_streamline=tuple(_pt(p) for p in r.capture_streamline),
         cowl_angle_deg=float(r.cowl_angle_deg),
         theta_max_freestream_deg=float(r.theta_max_freestream_deg),
-        cowl_margin_deg=float(r.cowl_margin_deg),
+        cowl_margin_deg=_f(r.cowl_margin_deg),
         notices=tuple(_notice(w) for w in r.warnings),
+        cowl_lip_region=int(r.cowl_lip_region), lip_mach=float(r.lip_mach),
+        lip_flow_angle_deg=float(r.lip_flow_angle_deg),
+        cowl_required_turn_deg=float(r.cowl_required_turn_deg),
     )
 
 

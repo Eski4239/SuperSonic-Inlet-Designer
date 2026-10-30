@@ -132,19 +132,21 @@ def design_inlet(M_inf, n_ramps, capture_height=1.0, scale=1.0, gamma=1.4, max_c
 COWL_MARGIN_WARN_DEG = 2.0
 
 
-def cowl_check(M_inf, cowl_angle_deg, gamma=1.4):
-    """External cowl attachment: margin = theta_max(M_inf) - cowl angle (deg).
+def cowl_check(M, turn_deg, gamma=1.4, where="M∞"):
+    """External cowl attachment: margin = theta_max(M) - turn (deg).
 
-    The cowl's outer surface turns the freestream by the cowl angle; past theta_max the
-    external cowl shock detaches. Returns (theta_max, margin, level, message), level is
-    "error" (margin < 0), "warn" (0 <= margin < COWL_MARGIN_WARN_DEG) or None.
+    The cowl turns the flow arriving at the lip (Mach M) by turn_deg; past theta_max the
+    external cowl shock detaches. At the design point M is M_inf and the turn is the cowl
+    angle; off design `where` names the local Mach ("local M"). Returns
+    (theta_max, margin, level, message), level is "error" (margin < 0),
+    "warn" (0 <= margin < COWL_MARGIN_WARN_DEG) or None.
     """
-    theta_max, _ = obl.max_deflection(M_inf, gamma)
-    margin = theta_max - cowl_angle_deg
+    theta_max, _ = obl.max_deflection(M, gamma)
+    margin = theta_max - turn_deg
     if margin < 0.0:
         return theta_max, margin, "error", (
-            f"External cowl shock detached (cowl turns {cowl_angle_deg:.2f} deg, "
-            f"theta_max = {theta_max:.2f} deg at M_inf = {M_inf:.2f}): bow shock, "
+            f"External cowl shock detached (cowl turns {turn_deg:.2f} deg, "
+            f"θ_max = {theta_max:.2f} deg at {where} = {M:.2f}): bow shock, "
             "spillage and cowl drag not modelled"
         )
     if margin < COWL_MARGIN_WARN_DEG:

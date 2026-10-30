@@ -343,6 +343,10 @@ def build_parser():
 
 
 def main(argv=None):
+    # Warnings contain θ/∞; a piped cp1252 stdout on Windows must not crash on them.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

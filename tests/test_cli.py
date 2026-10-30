@@ -93,3 +93,21 @@ def test_help_exits_zero():
         with pytest.raises(SystemExit) as exc_info:
             main(argv)
         assert exc_info.value.code == 0
+
+
+def test_offdesign_output_survives_a_cp1252_pipe():
+    """Cowl warnings contain θ_max / M∞; piped Windows stdout (cp1252) must not crash."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ, PYTHONIOENCODING="cp1252",
+               PYTHONPATH=src + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    out = subprocess.run(
+        [sys.executable, "-c", "import sys; from inletdesign.cli import main; "
+         "sys.exit(main(['offdesign', '--design-mach', '6.7', '--ramps', '4', '--mach', '6.7']))"],
+        env=env, capture_output=True, timeout=60)
+    assert out.returncode == 0, out.stderr.decode("cp1252", "replace")
+    assert b"External cowl shock detached" in out.stdout

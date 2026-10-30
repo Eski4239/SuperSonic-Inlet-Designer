@@ -31,7 +31,8 @@ def test_x15_four_ramp_cowl_is_detached():
     assert d.cowl_margin_deg < 0
     [notice] = _cowl_notices(d)
     assert notice.level == "error"
-    assert notice.text.startswith("External cowl shock detached (cowl turns 59.50 deg")
+    assert notice.text.startswith("External cowl shock detached (cowl turns 59.50 deg, "
+                                  f"θ_max = {d.theta_max_freestream_deg:.2f} deg at M∞ = 6.70)")
     assert "bow shock, spillage and cowl drag not modelled" in notice.text
 
 
@@ -48,19 +49,71 @@ def test_cowl_check_levels_are_closed_form():
     assert cowl_check(2.5, theta_max + 0.5)[2] == "error"
 
 
-def test_off_design_applies_cowl_check_per_mach():
+def test_off_design_cowl_check_uses_flow_at_the_lip():
     d = api.design(3.0, 2)
-    for M in (2.5, 3.0, 3.5):
+    # below design both ramp shocks cross ahead of the lip: the lip sits in the duct region,
+    # whose flow already runs at the cowl angle, so the cowl turns nothing
+    for M in (2.6, 2.75):
         r = api.off_design_point(d, M)
-        theta_max = obl.max_deflection(M)[0]
-        assert r.cowl_margin_deg == pytest.approx(theta_max - d.cowl_angle_deg)
-        level = cowl_check(M, d.cowl_angle_deg)[2]
-        assert [n.level for n in _cowl_notices(r)] == ([level] if level else [])
-    # below design Mach theta_max shrinks: the fixed cowl detaches
-    low = api.off_design_point(d, 2.6)
-    assert low.cowl_margin_deg < 0
-    assert any(n.level == "error" for n in low.notices)
-    json.dumps(low.to_dict())
+        assert r.regime == "spillage" and r.cowl_lip_region == 2
+        assert r.lip_flow_angle_deg == pytest.approx(d.cowl_angle_deg, abs=1e-12)
+        assert r.cowl_required_turn_deg == pytest.approx(0.0, abs=1e-9)
+        assert r.lip_mach == pytest.approx(r.regions[2].M)
+        assert r.cowl_margin_deg == pytest.approx(obl.max_deflection(r.lip_mach)[0])
+        assert not _cowl_notices(r)
+        json.dumps(r.to_dict())
+    # at design the lip is on the shocks: upstream (freestream) side, same as the design check
+    on = api.off_design_point(d, 3.0)
+    assert on.cowl_lip_region == 0
+    assert on.cowl_margin_deg == pytest.approx(d.cowl_margin_deg, abs=1e-9)
+    assert [n.level for n in _cowl_notices(on)] == ["warn"]
+    # above design the shocks enter the cowl: the lip meets freestream
+    for M in (3.25, 3.5):
+        r = api.off_design_point(d, M)
+        assert r.cowl_lip_region == 0
+        assert r.cowl_margin_deg == pytest.approx(obl.max_deflection(M)[0] - d.cowl_angle_deg)
+        assert r.cowl_margin_deg > 0
+
+
+def test_x15_still_detached_at_its_own_mach():
+    d = api.design(6.7, 4)
+    r = api.off_design_point(d, 6.7)
+    assert r.cowl_lip_region == 0
+    assert r.cowl_margin_deg == pytest.approx(d.cowl_margin_deg, abs=1e-9)
+    assert r.cowl_margin_deg < 0
+    assert [n.level for n in _cowl_notices(r)] == ["error"]
+
+
+def test_subsonic_aligned_lip_flow_has_no_margin():
+    d = api.design(3.0, 2)
+    r = api.off_design_point(d, 2.40)          # just above ramp-2 detachment (M 2.386)
+    assert r.lip_mach < 1.0 and r.cowl_required_turn_deg == pytest.approx(0.0, abs=1e-9)
+    assert r.cowl_margin_deg is None and not _cowl_notices(r)
+
+
+# Documented jumps of the margin along M_inf for the M3 2-ramp design: the lip changes region
+# only when a ramp shock crosses it. All shocks focus on the lip at the design Mach, so they
+# all cross there together: the single jump is at M 3.0 (duct region -> freestream).
+M3_MARGIN_JUMPS = [3.0]
+
+
+def test_margin_is_continuous_except_where_a_shock_crosses_the_lip():
+    d = api.design(3.0, 2)
+    machs = np.round(np.arange(2.40, 3.5 + 1e-9, 0.005), 6)
+    pts = [api.off_design_point(d, float(M)) for M in machs]
+    jumps = []
+    for M0, a, M1, b in zip(machs, pts, machs[1:], pts[1:]):
+        if a.cowl_lip_region != b.cowl_lip_region:
+            jumps.append(float(M1))
+            continue
+        if a.cowl_margin_deg is None or b.cowl_margin_deg is None:
+            assert (a.cowl_margin_deg is None) == (a.lip_mach < 1.0)
+            continue
+        assert abs(b.cowl_margin_deg - a.cowl_margin_deg) < 0.6, (M0, M1)
+    assert jumps == pytest.approx(M3_MARGIN_JUMPS)
+    # margin is None only where the lip flow is subsonic (just above detachment)
+    assert all((p.cowl_margin_deg is None) == (p.lip_mach < 1.0) for p in pts)
+    assert any(p.cowl_margin_deg is None for p in pts)
 
 
 # --- max cowl angle ------------------------------------------------------------------

@@ -13,7 +13,8 @@ from . import inlet as _inlet
 from .geometry import cowl_check
 from . import oblique_shock as obl
 
-SUBSONIC_WARNING = "flow subsonic behind last ramp shock; no terminal normal shock"
+COWL_ALIGNED_TOL_DEG = 1e-9   # cowl angle - lip flow angle at or below this: no cowl shock
+SUBSONIC_WARNING ="flow subsonic behind last ramp shock; no terminal normal shock"
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,13 @@ class OffDesignResult:
     capture_streamline: list = None   # [(x, y), ...] upstream end first, ending at the lip
     cowl_angle_deg: float = None
     theta_max_freestream_deg: float = None
-    cowl_margin_deg: float = None     # theta_max(M_inf) - cowl angle; < 0: cowl shock detached
+    # Cowl check on the flow reaching the lip: margin = theta_max(lip_mach) - required turn
+    # (< 0: cowl shock detached). None when the lip flow is subsonic and already aligned.
+    cowl_margin_deg: float = None
+    cowl_lip_region: int = None       # region containing the lip (0 = freestream)
+    lip_mach: float = None
+    lip_flow_angle_deg: float = None
+    cowl_required_turn_deg: float = None   # cowl angle - lip flow angle; <= 0: no cowl shock
 
 
 def _side_of_line(point, origin, angle_deg):
@@ -70,6 +77,7 @@ def off_design(geom, M_inf, gamma=1.4):
 
     phis = [0.0]
     M = M_inf
+    machs = [M_inf]                   # Mach number in each region, freestream first
     betas = []
     for i, theta in enumerate(ramp_angles):
         try:
@@ -81,6 +89,7 @@ def off_design(geom, M_inf, gamma=1.4):
             ) from exc
         betas.append(state["beta"])
         M = state["M2"]
+        machs.append(M)
         phis.append(phis[-1] + theta)
     M_duct = M
 
@@ -164,10 +173,24 @@ def off_design(geom, M_inf, gamma=1.4):
     if regime == "shock-in-duct":
         warnings.append("internal reflected shock not modelled; recovery is an upper bound")
 
+    # Cowl check against the flow that actually reaches the lip. The lip lies in the
+    # region behind the last ramp shock it is downstream of (freestream if none; on-lip
+    # counts as the upstream side, so the design point keeps the freestream check).
     cowl_angle = float(sum(ramp_angles))
-    theta_max_inf, cowl_margin, _, cowl_message = cowl_check(M_inf, cowl_angle, gamma)
-    if cowl_message:
-        warnings.append(cowl_message)
+    theta_max_inf, _ = obl.max_deflection(M_inf, gamma)
+    lip_region = max(crossed_shocks) + 1 if crossed_shocks else 0
+    lip_mach = float(machs[lip_region])
+    lip_flow_angle = float(phis[lip_region])
+    required_turn = cowl_angle - lip_flow_angle
+    if required_turn <= COWL_ALIGNED_TOL_DEG:
+        # lip flow already turned to the cowl angle (or expanding): no cowl shock needed
+        cowl_margin = float(obl.max_deflection(lip_mach, gamma)[0]) - max(required_turn, 0.0) \
+            if lip_mach >= 1.0 else None
+    else:
+        where = "M∞" if lip_region == 0 else "local M"
+        _, cowl_margin, _, cowl_message = cowl_check(lip_mach, required_turn, gamma, where)
+        if cowl_message:
+            warnings.append(cowl_message)
 
     return OffDesignResult(
         M_inf=M_inf,
@@ -182,5 +205,9 @@ def off_design(geom, M_inf, gamma=1.4):
         capture_streamline=streamline[::-1],
         cowl_angle_deg=cowl_angle,
         theta_max_freestream_deg=float(theta_max_inf),
-        cowl_margin_deg=float(cowl_margin),
+        cowl_margin_deg=None if cowl_margin is None else float(cowl_margin),
+        cowl_lip_region=int(lip_region),
+        lip_mach=lip_mach,
+        lip_flow_angle_deg=lip_flow_angle,
+        cowl_required_turn_deg=float(required_turn),
     )

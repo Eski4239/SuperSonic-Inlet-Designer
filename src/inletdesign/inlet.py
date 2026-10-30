@@ -6,19 +6,15 @@ from . import normal_shock as ns
 from . import oblique_shock as obl
 
 
-def compress(M_inf, ramp_angles_deg, gamma=1.4):
-    """Compress freestream flow through N oblique ramp shocks + a terminal normal shock.
+def compress_ramps(M_inf, ramp_angles_deg, gamma=1.4):
+    """Compress freestream flow through the N oblique ramp shocks only.
 
-    Each entry in ramp_angles_deg is the incremental flow deflection introduced
-    at that ramp, relative to the flow immediately upstream of it (i.e. the
-    result of the previous ramp, or freestream for the first ramp). Returns
-    one FlowState per shock (oblique ramps, then the terminal normal shock) —
-    not including the initial freestream state. The last entry's p0_ratio is
-    the overall total pressure recovery of the inlet.
+    Same convention as compress() (incremental ramp angles, ratios relative to
+    freestream), but without the terminal normal shock. Returns one FlowState
+    per ramp shock; the flow after the last one may be subsonic.
 
     Raises:
-        ValueError: if any oblique shock would detach, or if the flow is
-            subsonic entering the terminal normal shock.
+        ValueError: if any oblique shock would detach.
     """
     states = []
     M = M_inf
@@ -38,6 +34,29 @@ def compress(M_inf, ramp_angles_deg, gamma=1.4):
         states.append(
             FlowState(M=M, p_ratio=p_ratio, T_ratio=T_ratio, p0_ratio=p0_ratio, T0_ratio=1.0)
         )
+    return states
+
+
+def compress(M_inf, ramp_angles_deg, gamma=1.4):
+    """Compress freestream flow through N oblique ramp shocks + a terminal normal shock.
+
+    Each entry in ramp_angles_deg is the incremental flow deflection introduced
+    at that ramp, relative to the flow immediately upstream of it (i.e. the
+    result of the previous ramp, or freestream for the first ramp). Returns
+    one FlowState per shock (oblique ramps, then the terminal normal shock) —
+    not including the initial freestream state. The last entry's p0_ratio is
+    the overall total pressure recovery of the inlet.
+
+    Raises:
+        ValueError: if any oblique shock would detach, or if the flow is
+            subsonic entering the terminal normal shock.
+    """
+    states = compress_ramps(M_inf, ramp_angles_deg, gamma)
+    if states:
+        last = states[-1]
+        M, p_ratio, T_ratio, p0_ratio = last.M, last.p_ratio, last.T_ratio, last.p0_ratio
+    else:
+        M, p_ratio, T_ratio, p0_ratio = M_inf, 1.0, 1.0, 1.0
 
     M2 = ns.mach_downstream(M, gamma=gamma)
     p_ratio *= ns.pressure_ratio(M, gamma=gamma)

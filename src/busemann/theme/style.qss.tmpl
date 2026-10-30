@@ -1,0 +1,182 @@
+/* Busemann stylesheet template. Every value comes from theme/tokens.py via string.Template. */
+
+QWidget {
+    font-family: "$font_ui", "$font_ui_fallback";
+    font-size: ${size_base}px;
+    color: $text;
+}
+
+QMainWindow, #canvasHost {
+    background: $bg;
+}
+
+#leftPanel, #rightPanel, #panelBody {
+    background: $surface;
+}
+
+#leftPanel { border-right: ${border_w}px solid $border; }
+#rightPanel { border-left: ${border_w}px solid $border; }
+
+QScrollArea { border: none; background: $surface; }
+
+#sectionTitle {
+    font-size: ${size_label}px;
+    font-weight: 600;
+    color: $text;
+    padding-top: ${s1}px;
+}
+
+#fieldLabel, #kpiTitle, #readoutLabel {
+    font-size: ${size_label}px;
+    color: $text_muted;
+}
+
+#muted { color: $text_muted; font-size: ${size_label}px; }
+
+#unit, #readoutUnit {
+    font-family: "$font_mono", "$font_mono_fallback";
+    font-size: ${size_label}px;
+    color: $text_muted;
+}
+
+#readoutValue {
+    font-family: "$font_mono", "$font_mono_fallback";
+    color: $text;
+}
+
+#divider { background: $border; max-height: ${border_w}px; min-height: ${border_w}px; }
+
+/* --- inputs --------------------------------------------------------- */
+
+QLineEdit {
+    font-family: "$font_mono", "$font_mono_fallback";
+    background: $surface;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+    padding: 3px ${s1}px;
+    selection-background-color: $accent;
+}
+QLineEdit:focus { border-color: $accent; }
+QLineEdit[invalid="true"] { border-bottom: 2px solid $error; }
+QLineEdit:read-only { background: $bg; color: $text_muted; }
+
+#fieldError { color: $error; font-size: ${size_label}px; }
+
+QComboBox {
+    background: $surface;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+    padding: 3px ${s1}px;
+}
+QComboBox:focus { border-color: $accent; }
+QComboBox::drop-down { border: none; width: ${s3}px; }
+QComboBox::down-arrow { image: url("$chevron_down"); width: 14px; height: 14px; }
+QComboBox QAbstractItemView {
+    background: $surface;
+    border: ${border_w}px solid $border;
+    selection-background-color: $accent;
+    selection-color: $surface;
+}
+
+QSlider::groove:horizontal { height: 4px; background: $border; border-radius: 2px; }
+QSlider::sub-page:horizontal { background: $accent; border-radius: 2px; }
+QSlider::handle:horizontal {
+    background: $surface;
+    border: 2px solid $accent;
+    width: 12px; height: 12px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+
+/* --- segmented control ---------------------------------------------- */
+
+#segment {
+    background: $surface;
+    border: ${border_w}px solid $border;
+    border-radius: 0px;
+    padding: 4px ${s1}px;
+    min-height: 18px;
+    color: $text;
+}
+#segment[first="true"] { border-top-left-radius: ${radius}px; border-bottom-left-radius: ${radius}px; }
+#segment[last="true"] { border-top-right-radius: ${radius}px; border-bottom-right-radius: ${radius}px; }
+#segment:hover { background: $bg; }
+#segment:checked { background: $accent; border-color: $accent; color: $surface; }
+
+#sectionToggle {
+    border: none;
+    background: transparent;
+    text-align: left;
+    padding: 2px 0px;
+    color: $text_muted;
+    font-size: ${size_label}px;
+}
+
+/* --- KPI cards ------------------------------------------------------ */
+
+#kpiCard {
+    background: $surface;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+}
+#kpiValue {
+    font-family: "$font_mono", "$font_mono_fallback";
+    font-size: ${size_kpi}px;
+    color: $text;
+}
+#kpiSub { color: $text_muted; font-size: ${size_label}px; }
+
+#warningRow { color: $text; }
+#warningsBox {
+    border: ${border_w}px solid $warn;
+    border-radius: ${radius}px;
+    background: $surface;
+}
+#errorText { color: $error; }
+
+/* --- chrome --------------------------------------------------------- */
+
+QToolBar {
+    background: $surface;
+    border: none;
+    border-bottom: ${border_w}px solid $border;
+    spacing: ${s1}px;
+    padding: 4px ${s1}px;
+}
+QToolButton { border: ${border_w}px solid transparent; border-radius: ${radius}px; padding: 4px; }
+QToolButton:hover { border-color: $border; background: $bg; }
+QToolButton:checked { background: $bg; border-color: $border; }
+
+QStatusBar {
+    background: $surface;
+    border-top: ${border_w}px solid $border;
+    color: $text_muted;
+}
+QStatusBar QLabel { color: $text_muted; font-size: ${size_label}px; padding: 0px ${s1}px; }
+QStatusBar::item { border: none; }
+
+QProgressBar#busy { background: $border; border: none; max-height: 3px; min-height: 3px; }
+QProgressBar#busy::chunk { background: $accent; }
+
+QTabWidget::pane { border: none; background: $surface; }
+QTabBar::tab {
+    background: transparent;
+    padding: 6px ${s2}px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: $text_muted;
+}
+QTabBar::tab:selected { color: $text; border-bottom: 2px solid $accent; }
+
+QToolTip {
+    background: $surface;
+    color: $text;
+    border: ${border_w}px solid $border;
+    padding: 4px;
+}
+
+QScrollBar:vertical { background: $surface; width: ${s1}px; margin: 0px; border: none; }
+QScrollBar::handle:vertical { background: $border; border-radius: 3px; min-height: ${s3}px; }
+QScrollBar::handle:vertical:hover { background: $text_muted; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }

@@ -12,6 +12,8 @@ import numpy as np
 from . import inlet as _inlet
 from . import oblique_shock as obl
 
+SUBSONIC_WARNING = "flow subsonic behind last ramp shock; no terminal normal shock"
+
 
 @dataclass(frozen=True)
 class OffDesignResult:
@@ -45,8 +47,13 @@ def _segment_intersection(p1, d1, p2, d2):
 def off_design(geom, M_inf, gamma=1.4):
     """Evaluate a fixed inlet geometry (ramp angles/corners/lip unchanged) at a new M_inf.
 
+    If the flow behind the last ramp shock is subsonic (possible just above
+    detachment), no terminal normal shock is applied: recovery_total equals
+    recovery_oblique, M_duct is that subsonic Mach number, and a warning is added.
+
     Raises:
-        ValueError: if any ramp shock detaches at the new M_inf.
+        ValueError: if any ramp shock detaches at the new M_inf
+            (message contains "shock detached").
     """
     h_c = geom.capture_height
     ramp_angles = geom.ramp_angles_deg
@@ -136,9 +143,15 @@ def off_design(geom, M_inf, gamma=1.4):
             point = result[0]
         mass_capture_ratio = point[1] / h_c
 
-    states = _inlet.compress(M_inf, ramp_angles, gamma)
-    recovery_oblique = states[n - 1].p0_ratio if n > 0 else 1.0
-    recovery_total = states[-1].p0_ratio
+    ramp_states = _inlet.compress_ramps(M_inf, ramp_angles, gamma)
+    recovery_oblique = ramp_states[-1].p0_ratio if n > 0 else 1.0
+    if M_duct < 1.0:
+        # Just above detachment the weak-branch solution can be subsonic: there
+        # is no terminal normal shock, so the obliques set the whole recovery.
+        recovery_total = recovery_oblique
+        warnings.append(SUBSONIC_WARNING)
+    else:
+        recovery_total = _inlet.compress(M_inf, ramp_angles, gamma)[-1].p0_ratio
 
     if regime == "shock-in-duct":
         warnings.append("internal reflected shock not modelled; recovery is an upper bound")

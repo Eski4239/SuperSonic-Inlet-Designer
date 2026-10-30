@@ -279,6 +279,17 @@ def _handle_offdesign(args):
     return 0
 
 
+def _handle_gui(args):
+    # Lazy import: the core install has no Qt; the app is an optional extra.
+    try:
+        from busemann.app import main as gui_main
+    except ImportError as exc:
+        raise CliError(
+            f"the Busemann GUI is not installed ({exc}); install it with: pip install -e .[app]"
+        ) from exc
+    return gui_main([])
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog="inletdesign")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -324,6 +335,9 @@ def build_parser():
     offdesign_parser.add_argument("--json", type=str, default=None)
     offdesign_parser.add_argument("--plot", type=str, default=None)
     offdesign_parser.set_defaults(handler=_handle_offdesign)
+
+    gui_parser = subparsers.add_parser("gui", help="open the Busemann desktop app")
+    gui_parser.set_defaults(handler=_handle_gui)
 
     return parser
 

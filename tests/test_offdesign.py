@@ -161,3 +161,25 @@ def test_cli_offdesign_json_and_plot(tmp_path):
     assert code == 0
     assert json_path.exists()
     assert plot_path.exists()
+
+
+def test_sweep_near_detachment_never_raises_unexpectedly():
+    """Spec section 6: M 2.39 -> 3.5 in 0.005 steps, result or documented detachment error."""
+    from inletdesign.offdesign import SUBSONIC_WARNING
+
+    geom = design_inlet(3.0, 2, capture_height=0.1)
+    n_subsonic = 0
+    for M in np.round(np.arange(2.39, 3.5 + 1e-9, 0.005), 3):
+        try:
+            r = off_design(geom, float(M))
+        except ValueError as exc:
+            assert "shock detached" in str(exc)
+            continue
+        if r.M_duct < 1.0:
+            n_subsonic += 1
+            assert SUBSONIC_WARNING in r.warnings
+            assert r.recovery_total == r.recovery_oblique
+        else:
+            assert SUBSONIC_WARNING not in r.warnings
+            assert r.recovery_total < r.recovery_oblique
+    assert n_subsonic > 0  # the band exists for this design

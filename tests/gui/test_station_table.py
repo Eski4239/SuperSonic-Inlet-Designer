@@ -63,7 +63,7 @@ def test_copy_table_puts_tsv_on_clipboard(qtbot, window):
     text = QApplication.clipboard().text()
     lines = text.splitlines()
     assert lines[0].split("\t") == ["Region", "M", "p/p_inf", "T/T_inf", "p0/p0_inf",
-                                    "flow angle (deg)"]
+                                    "flow angle (°)"]
     d = api.design(3.0, 2)
     assert len(lines) == 1 + len(d.regions)
     for line, st in zip(lines[1:], d.regions):
@@ -98,3 +98,17 @@ def test_table_follows_the_off_design_tab(qtbot, window):
 def test_ratio_text_keeps_four_significant_digits():
     assert [ratio_text(x) for x in (1.0, 6.5321, 12.6136, 158.424, 469.181, 1234.5)] == [
         "1.000", "6.532", "12.61", "158.4", "469.2", "1234"]
+
+
+@pytest.mark.parametrize("changes", [{}, {"n_ramps": 4}, {"mach": 6.7, "n_ramps": 4},
+                                     {"n_ramps": 0}, {"mach": 2.0, "n_ramps": 1}])
+def test_no_clipped_columns_at_1440x900(qtbot, window, changes):
+    if changes:
+        with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+            window.state.update(**changes)
+    table = _table(window)
+    assert window.width() == 1440 and window.height() == 900
+    assert table.column_overflow() == []
+    window.tabs.setCurrentWidget(window.offdesign_tab)          # off-design numbers too
+    qtbot.waitUntil(lambda: table.rowCount() > 0, timeout=2000)
+    assert table.column_overflow() == []

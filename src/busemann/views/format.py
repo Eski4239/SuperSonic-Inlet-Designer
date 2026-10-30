@@ -26,7 +26,7 @@ _NBSP = " "
 
 
 def nbsp(text):
-    """Keep "M = 2.406", "28.75 deg", "0.28 deg" etc. on one line (non-breaking spaces)."""
+    """Keep "M = 2.406", "28.75 kPa", "θ = 14.98°" etc. on one line (non-breaking spaces)."""
     if not text:
         return text
     import re

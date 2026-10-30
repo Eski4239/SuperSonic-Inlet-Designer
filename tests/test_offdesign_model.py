@@ -20,7 +20,7 @@ def test_cfd_data_matches_phase3d_validation():
 
 @pytest.mark.parametrize("kwargs, applies", [
     (dict(M=3.0, n_ramps=2), True),
-    (dict(M=3.0, n_ramps=2, cowl_wedge=6.0), True),
+    (dict(M=3.0, n_ramps=2, cowl_wedge=6.0), False),
     (dict(M=3.0 + 1e-7, n_ramps=2), True),
     (dict(M=3.001, n_ramps=2), False),
     (dict(M=3.0, n_ramps=3), False),
@@ -91,3 +91,10 @@ def test_four_ramp_design_detached_from_design_mach_up():
     bands = model.regime_bands(d, sweep, 1.2, 4.5)
     assert bands[0].label == "4th ramp shock detached"
     assert [(b.lo, b.hi) for b in bands if b.kind == "cowl"] == [(3.0, 4.5)]
+
+
+def test_cfd_note_names_the_reason():
+    assert model.cfd_note(api.design(3.0, 2)) is None
+    assert model.cfd_note(api.design(3.0, 2, cowl_wedge=6.0)) == model.CFD_WEDGE_NOTE
+    assert model.cfd_note(api.design(3.0, 3, cowl_wedge=6.0)) == model.CFD_NOTE
+    assert model.cfd_note(None) == model.CFD_NOTE

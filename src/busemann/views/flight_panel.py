@@ -9,6 +9,7 @@ from ..widgets import (
     CollapsibleSection, LabeledSlider, NumberField, SegmentedControl, field_label, section_title,
 )
 from .readout import Readout
+from ..tooltips import attach, tip
 
 MACH_RANGE = (1.2, 7.0)       # slider covers every preset (X-15 is M 6.7)
 ALTITUDE_RANGE_M = (0.0, 40000.0)
@@ -30,6 +31,7 @@ class FlightPanel(QWidget):
         i = state.inputs
 
         self.units = SegmentedControl([("SI", "SI"), ("Imperial", "Imperial")], i.units)
+        self.units.setToolTip(tip("flight.units_toggle"))
         self.preset = QComboBox()
         self.preset.addItem(CUSTOM)
         for p in _presets.PRESETS:
@@ -37,49 +39,54 @@ class FlightPanel(QWidget):
             self.preset.setItemData(self.preset.count() - 1, p.description)
         self.preset_note = QLabel()
         self.preset_note.setObjectName("muted")
+        self.preset_note.setToolTip(tip("flight.preset_note"))
         self.preset_note.setWordWrap(True)
         self.preset_note.hide()
 
         self.mach = LabeledSlider("Mach number", *MACH_RANGE, 0.01, i.mach, decimals=2)
-        self.mach.setToolTip("Freestream Mach number M∞ (dimensionless).")
+        self.mach.label.setToolTip(tip("label.mach_number"))
+        attach(self.mach, "field.mach")
 
         self.mode = SegmentedControl(
             [("altitude", "Altitude"), ("manual", "Manual p, T")], i.atmosphere_mode
         )
+        self.mode.setToolTip(tip("flight.mode"))
         self.altitude = NumberField(0.0)
         self.pressure = NumberField(0.0, min_exclusive=True)
         self.temperature = NumberField(0.0, min_exclusive=True)
-        self.altitude.setToolTip("Geometric altitude; U.S. Standard Atmosphere 1976.")
-        self.pressure.setToolTip("Freestream static pressure p∞.")
-        self.temperature.setToolTip("Freestream static temperature T∞.")
+        attach(self.altitude, "field.altitude")
+        attach(self.pressure, "field.p_inf")
+        attach(self.temperature, "field.t_inf")
 
         self.altitude_row = QWidget()
         alt_form = _form(self.altitude_row)
-        alt_form.addRow(field_label("Altitude"), self.altitude)
+        alt_form.addRow(field_label("Altitude", "label.altitude"), self.altitude)
         self.manual_row = QWidget()
         man_form = _form(self.manual_row)
-        man_form.addRow(field_label("p∞"), self.pressure)
-        man_form.addRow(field_label("T∞"), self.temperature)
+        man_form.addRow(field_label("p∞", "label.p_inf"), self.pressure)
+        man_form.addRow(field_label("T∞", "label.t_inf"), self.temperature)
 
         gamma_box = QWidget()
         gamma_form = _form(gamma_box)
         self.gamma = NumberField(i.gamma, decimals=3, minimum=GAMMA_RANGE[0],
                                  maximum=GAMMA_RANGE[1], min_exclusive=True)
-        self.gamma.setToolTip("Ratio of specific heats γ = cp/cv (1.4 for air).")
-        gamma_form.addRow(field_label("γ (cp/cv)"), self.gamma)
-        self.advanced = CollapsibleSection("Advanced", gamma_box, collapsed=True)
+        attach(self.gamma, "field.gamma")
+        gamma_form.addRow(field_label("γ (cp/cv)", "label.gamma"), self.gamma)
+        self.advanced = CollapsibleSection("Advanced", gamma_box, collapsed=True,
+                                           tooltip=tip("flight.advanced"))
 
         self.readout = Readout([
-            ("p", "p∞", "pressure", "Freestream static pressure."),
-            ("T", "T∞", "temperature", "Freestream static temperature."),
-            ("rho", "ρ∞", "density", "Freestream density."),
-            ("V", "V∞", "velocity", "Flight speed, V∞ = M∞ a∞."),
-            ("p0", "p0∞", "pressure", "Freestream total (stagnation) pressure."),
-            ("T0", "T0∞", "temperature", "Freestream total (stagnation) temperature."),
-            ("Re", "Re / length", "per_length", "Unit Reynolds number ρ∞V∞/μ∞ (Sutherland μ)."),
+            ("p", "p∞", "pressure", "readout.p"),
+            ("T", "T∞", "temperature", "readout.T"),
+            ("rho", "ρ∞", "density", "readout.rho"),
+            ("V", "V∞", "velocity", "readout.V"),
+            ("p0", "p0∞", "pressure", "readout.p0"),
+            ("T0", "T0∞", "temperature", "readout.T0"),
+            ("Re", "Re / length", "per_length", "readout.Re"),
         ])
         self.error = QLabel()
         self.error.setObjectName("errorText")
+        self.error.setToolTip(tip("flight.error"))
         self.error.setWordWrap(True)
         self.error.hide()
 
@@ -87,22 +94,23 @@ class FlightPanel(QWidget):
         top.setContentsMargins(0, 0, 0, 0)
         top.setHorizontalSpacing(tokens.space(1))
         top.setVerticalSpacing(tokens.space(1))
-        top.addRow(field_label("Units"), self.units)
-        top.addRow(field_label("Preset"), self.preset)
+        top.addRow(field_label("Units", "label.units"), self.units)
+        top.addRow(field_label("Preset", "label.preset"), self.preset)
+        self.preset.setToolTip(tip("label.preset"))
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.space(2), tokens.space(2), tokens.space(2), tokens.space(2))
         layout.setSpacing(tokens.space(1) + 4)
-        layout.addWidget(section_title("Flight conditions"))
+        layout.addWidget(section_title("Flight conditions", "section.flight_conditions"))
         layout.addLayout(top)
         layout.addWidget(self.preset_note)
         layout.addWidget(self.mach)
-        layout.addWidget(field_label("Atmosphere"))
+        layout.addWidget(field_label("Atmosphere", "label.atmosphere"))
         layout.addWidget(self.mode)
         layout.addWidget(self.altitude_row)
         layout.addWidget(self.manual_row)
         layout.addWidget(self.advanced)
-        layout.addWidget(field_label("Freestream"))
+        layout.addWidget(field_label("Freestream", "label.freestream"))
         layout.addWidget(self.readout)
         layout.addWidget(self.error)
 

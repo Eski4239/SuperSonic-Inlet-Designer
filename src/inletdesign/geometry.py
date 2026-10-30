@@ -145,12 +145,12 @@ def cowl_check(M, turn_deg, gamma=1.4, where="M∞"):
     margin = theta_max - turn_deg
     if margin < 0.0:
         return theta_max, margin, "error", (
-            f"External cowl shock detached (cowl turns {turn_deg:.2f} deg, "
-            f"θ_max = {theta_max:.2f} deg at {where} = {M:.2f}): bow shock, "
+            f"External cowl shock detached (cowl turns {turn_deg:.2f}°, "
+            f"θ_max = {theta_max:.2f}° at {where} = {M:.2f}): bow shock, "
             "spillage and cowl drag not modelled"
         )
     if margin < COWL_MARGIN_WARN_DEG:
-        return theta_max, margin, "warn", f"Cowl near shock detachment (margin {margin:.2f} deg)"
+        return theta_max, margin, "warn", f"Cowl near shock detachment (margin {margin:.2f}°)"
     return theta_max, margin, None, None
 
 

@@ -4,8 +4,10 @@ from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
 
 from ..theme import qt as theme
 from ..theme import tokens
+from ..tooltips import tip
 
-HEADERS = (("Ramp", ""), ("θ", "deg"), ("β", "deg"), ("M after", ""))
+HEADERS = (("Ramp", ""), ("θ", "(°)"), ("β", "(°)"), ("M after", ""))
+HEADER_TIPS = ("ramp_table.ramp", "ramp_table.theta", "ramp_table.beta", "ramp_table.m_after")
 
 
 class RampTable(QWidget):
@@ -21,11 +23,13 @@ class RampTable(QWidget):
             head = QLabel(text)
             head.setObjectName("readoutLabel")
             head.setAlignment(_align(c))
+            head.setToolTip(tip(HEADER_TIPS[c]))
             self._grid.addWidget(head, 0, c)
             self._grid.setColumnStretch(c, 0 if c == 0 else 1)
         self._cells = []
         self.empty = QLabel("No ramps (pitot inlet)")
         self.empty.setObjectName("selectionHint")
+        self.empty.setToolTip(tip("ramp_table.row"))
         self._grid.addWidget(self.empty, 1, 0, 1, len(HEADERS))
         self.rows = []
 
@@ -43,6 +47,7 @@ class RampTable(QWidget):
                 cell.setObjectName("readoutValue")
                 cell.setFont(theme.mono_font())
                 cell.setAlignment(_align(c))
+                cell.setToolTip(tip("ramp_table.row"))
                 self._grid.addWidget(cell, r, c)
                 self._cells.append(cell)
 

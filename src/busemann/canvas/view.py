@@ -14,8 +14,9 @@ from inletdesign import units as _units
 
 from ..theme import qt as theme
 from ..theme import tokens
+from ..tooltips import tip
 from ..views import format as fmt
-from ..views.rows import region_rows, shock_rows
+from ..views.rows import cowl_rows, region_rows, shock_rows
 from . import picture as P
 from .hover_card import HoverCard
 from .scene import M, S, InletScene, color
@@ -65,6 +66,7 @@ class InletCanvas(QGraphicsView):
         self.hover_card = HoverCard(self.viewport())
         self.overlay = QLabel(self.viewport())
         self.overlay.setObjectName("canvasOverlay")
+        self.overlay.setToolTip(tip("canvas.overlay"))
         self.overlay.setWordWrap(True)
         self.overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -324,7 +326,7 @@ class InletCanvas(QGraphicsView):
         if pic is None or kind is None:
             return None
         if kind == "cowl":
-            return None
+            return pic.skeleton
         items = pic.regions if kind == "region" else pic.shocks
         return items[index].state if index < len(items) else None
 
@@ -356,9 +358,7 @@ class InletCanvas(QGraphicsView):
         pic = self.inlet_scene.picture
         if kind == "cowl":
             sk = pic.skeleton
-            rows = [("cowl_angle", "Cowl angle", sk.phi_n, f"{sk.phi_n:.2f}", "deg"),
-                    ("lip_wedge", "Lip wedge", sk.cowl_wedge_deg, f"{sk.cowl_wedge_deg:.2f}",
-                     "deg")]
+            rows = cowl_rows(sk)
             note = (f"drawn thickened for visibility ({P.MIN_DRAWN_WEDGE_DEG:g}° wedge)"
                     if sk.wedge_thickened else "")
             self.hover_card.show_rows("Cowl", rows, QPointF(view_pos).toPoint(), note)
@@ -413,10 +413,7 @@ class InletCanvas(QGraphicsView):
             moved = (event.position() - self._press_at).manhattanLength()
             self._press_at = None
             if moved < 4 and self.error_text is None:
-                kind, index = self.pick(event.position())
-                if kind == "cowl":          # hover-only: clicking the cowl clears selection
-                    kind, index = None, None
-                self.select(kind, index)
+                self.select(*self.pick(event.position()))
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):

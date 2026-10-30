@@ -126,6 +126,8 @@ QSlider::handle:horizontal {
     color: $text;
 }
 #kpiSub { color: $text_muted; font-size: ${size_label}px; }
+#kpiDelta { color: $text_muted; font-size: ${size_label}px; font-family: "$font_mono", "$font_mono_fallback"; }
+#noticeGroup { color: $text_muted; font-size: ${size_label}px; font-weight: 600; }
 
 #warningRow, #infoRow { color: $text; }
 #noticeCard {
@@ -165,6 +167,14 @@ QSlider::handle:horizontal {
     padding: 0px;
 }
 #linkButton:hover { text-decoration: underline; }
+#explainDrawer {
+    background: $surface;
+    border-left: ${border_w}px solid $border;
+}
+#drawerTitle { font-weight: 600; font-size: 15px; color: $text; }
+#drawerTopics { color: $text_muted; font-size: ${size_label}px; }
+#drawerClose { font-size: 16px; color: $text_muted; }
+#explainBody { border: none; background: $surface; }
 #chip {
     color: $text;
     background: $bg;

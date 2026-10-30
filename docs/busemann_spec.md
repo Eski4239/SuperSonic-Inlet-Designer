@@ -204,12 +204,14 @@ on white.
 - **Bug fix** in `offdesign.py`: just above second-shock detachment (M 2.39–2.40 for the
   validation design), the flow behind the last ramp shock is subsonic, and the terminal
   normal-shock step raises. In that case: no terminal shock; recovery_total =
-  recovery_oblique; M_duct = that subsonic value; warning "flow subsonic behind last ramp
+  recovery_oblique; M_pre_terminal = M_post_terminal = that subsonic value; warning "flow subsonic behind last ramp
   shock; no terminal normal shock". Test: sweep M 2.39→3.5 in steps of 0.005 — every point
   returns a result or raises the documented "shock detached" ValueError, nothing else.
 - `api.py`:
-  - `design(...) -> DesignResult` (inputs, angles, per-region states, recoveries, M_duct,
-    throat, geometry polylines, warnings);
+  - `design(...) -> DesignResult` (inputs, angles, per-region states, recoveries,
+    M_pre_terminal / M_post_terminal, throat, geometry polylines, warnings). (M5: the
+    ambiguous `M_duct` was renamed; it remains as a deprecated alias for one milestone,
+    meaning post-terminal on DesignResult and pre-terminal on OffDesignResult.)
   - `off_design_point(design, M) -> OffDesignResult`;
   - `off_design_sweep(design, M_min, M_max, n) -> Sweep` (points plus detachment Mach);
   - `freestream(M, altitude | (p, T), gamma) -> Freestream` (dimensional quantities).

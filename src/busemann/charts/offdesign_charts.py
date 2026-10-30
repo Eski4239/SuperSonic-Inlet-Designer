@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ..theme import qt as theme
 from ..theme import tokens
+from ..tooltips import tip
 from ..widgets import field_label
 from . import model
 
@@ -22,12 +23,21 @@ BAND_STYLE = {"detached": ("error", 22), "spillage": ("accent", 14),
               "overspeed": ("warn", 18), "cowl": ("error", 40)}
 CHARTS = (("capture", "Capture A0/Ac", ""),
           ("recovery", "Recovery p0/p0∞", ""),
-          ("margin", "Cowl margin", "deg"))
+          ("margin", "Cowl margin", "°"))
+TITLE_TIPS = {"capture": "label.chart_capture", "recovery": "label.chart_recovery",
+              "margin": "label.chart_margin"}
+ENTRY_SEP = "&nbsp;&nbsp; "   # ends in an ordinary space: the only place a row may wrap
 LEFT_AXIS_W = 34          # px, same on every chart so the linked M∞ axes line up
 
 
 def _key(token, glyph):
     return f'<span style="color:{tokens.COLORS[token]}">{glyph}</span>'
+
+
+def _entry(marker_html, text):
+    """(html, plain text) of one legend entry; its spaces are non-breaking."""
+    glued = text.replace(" ", "\u00a0")
+    return f"{marker_html}&nbsp;{glued}", glued
 
 
 def _swatch(token, alpha):
@@ -75,11 +85,12 @@ class OffDesignCharts(QWidget):
         for key, title, unit in CHARTS:
             box = QVBoxLayout()
             box.setSpacing(2)
-            box.addWidget(field_label(f"{title} ({unit})" if unit else title))
+            box.addWidget(field_label(f"{title} ({unit})" if unit else title, TITLE_TIPS[key]))
             legend = QLabel()
             legend.setObjectName("chartLegend")
             legend.setTextFormat(Qt.TextFormat.RichText)
             legend.setWordWrap(True)          # one line normally; wraps at minimum width
+            legend.setToolTip(tip(f"chart.legend.{key}"))
             self.legends[key] = legend
             box.addWidget(legend)
             w = pg.PlotWidget(background=tokens.COLORS["surface"])
@@ -96,6 +107,8 @@ class OffDesignCharts(QWidget):
                 axis.setTextPen(_pen("text_muted", 1))
                 axis.setTickFont(tick_font)
             item.getAxis("left").setWidth(LEFT_AXIS_W)
+            item.getAxis("left").setToolTip(tip(f"chart.axis.{key}"))
+            item.getAxis("bottom").setToolTip(tip("chart.axis.mach"))
             item.getAxis("bottom").setLabel("M∞", color=tokens.COLORS["text_muted"])
             cursor = pg.InfiniteLine(angle=90, movable=True, pen=_pen("accent", 1.5),
                                      hoverPen=_pen("accent", 3))
@@ -109,11 +122,18 @@ class OffDesignCharts(QWidget):
         self.plots["recovery"].setXLink(self.plots["capture"])
         self.plots["margin"].setXLink(self.plots["capture"])
 
+        # Two footer rows (regime bands; notes). Inside an entry every space is a
+        # non-breaking space, so a row can wrap only between entries, never mid-phrase.
         self.band_legend = QLabel()
-        self.band_legend.setObjectName("chartLegend")
-        self.band_legend.setWordWrap(True)
-        self.band_legend.setTextFormat(Qt.TextFormat.RichText)
+        self.note_legend = QLabel()
+        for label in (self.band_legend, self.note_legend):
+            label.setObjectName("chartLegend")
+            label.setWordWrap(True)
+            label.setTextFormat(Qt.TextFormat.RichText)
+        self.band_legend.setToolTip(tip("chart.legend.bands"))
+        self.note_legend.setToolTip(tip("chart.legend.notes"))
         self.cfd_note = QLabel(model.CFD_NOTE)
+        self.cfd_note.setToolTip(tip("chart.cfd_note"))
         self.cfd_note.setObjectName("muted")
         self.cfd_note.setWordWrap(True)
         self.cfd_note.hide()
@@ -122,6 +142,7 @@ class OffDesignCharts(QWidget):
         layout.setSpacing(2)
         layout.addLayout(row, 1)
         layout.addWidget(self.band_legend)
+        layout.addWidget(self.note_legend)
         layout.addWidget(self.cfd_note)
 
     # --- data ---------------------------------------------------------------------------
@@ -134,7 +155,9 @@ class OffDesignCharts(QWidget):
         self.curves, self.band_items, self.bands, self.cfd_items = {}, [], [], []
         self.band_labels = []                 # band legend entries, in order
         self._band_parts, self.footer_parts = [], []
+        self.legend_entries = []              # (row, entry text with NBSPs), for tests
         self.band_legend.setText("")
+        self.note_legend.setText("")
         self.cfd_visible = False
 
     def set_data(self, design, sweep, m_range):
@@ -198,13 +221,16 @@ class OffDesignCharts(QWidget):
         self.legends["margin"].setText(
             f"{_key('accent', '━')} at the lip, wedge {wedge:g}° &nbsp; "
             f"{_key('error', '╌')} 0")
-        parts = list(self._band_parts)
+        notes = []
         if overspeed:
-            parts.append(f"{_key('text_muted', '┅')} above design: {UPPER_BOUND_TEXT}")
+            notes.append(_entry(_key("text_muted", "┅"), f"above design: {UPPER_BOUND_TEXT}"))
         if self.cfd_visible:
-            parts.append(f"{_key('text', '○')} CFD (Fluent, inviscid)")
-        self.footer_parts = parts
-        self.band_legend.setText(" &nbsp;&nbsp; ".join(parts))
+            notes.append(_entry(_key("text", "○"), "CFD (Fluent, inviscid)"))
+        self.footer_parts = [text for _, text in self._band_parts + notes]
+        self.legend_entries = ([("bands", t) for _, t in self._band_parts]
+                               + [("notes", t) for _, t in notes])
+        self.band_legend.setText(ENTRY_SEP.join(html for html, _ in self._band_parts))
+        self.note_legend.setText(ENTRY_SEP.join(html for html, _ in notes))
 
     def _draw_bands(self):
         """Shaded bands on every chart; their labels go in the legend row below."""
@@ -223,12 +249,14 @@ class OffDesignCharts(QWidget):
                 continue
             seen.add(band.label)
             self.band_labels.append(band.label)
-            parts.append(f"{_swatch(*BAND_STYLE[band.kind])} {band.label}")
+            parts.append(_entry(_swatch(*BAND_STYLE[band.kind]), band.label))
         self._band_parts = parts
 
     def _draw_cfd(self, design):
         self.cfd_visible = model.cfd_applies(design)
-        self.cfd_note.setVisible(not self.cfd_visible)
+        note = model.cfd_note(design)
+        self.cfd_note.setText(note or "")
+        self.cfd_note.setVisible(note is not None)
         if not self.cfd_visible:
             return
         data = model.load_cfd()

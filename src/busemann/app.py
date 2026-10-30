@@ -14,6 +14,8 @@ from .canvas import InletCanvas
 from .state import AppState
 from .theme import tokens
 from .views import DesignPanel, FlightPanel, ResultsPanel
+from .tooltips import tip
+from .views.explain_drawer import ExplainDrawer
 from .views.offdesign_tab import OffDesignTab
 from .widgets import divider
 
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self.right_panel)
         self.setCentralWidget(centre)
 
+        self.explain_drawer = ExplainDrawer(self.state, self)
         self._build_toolbar()
         self._build_status_bar()
 
@@ -98,8 +101,10 @@ class MainWindow(QMainWindow):
         bar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(bar)
         self.toggle_left = QAction(theme.icon("panel-left", "text"), "Show inputs panel", self)
+        self.toggle_left.setToolTip(tip("toolbar.toggle_left"))
         self.toggle_left.setShortcut(QKeySequence("Ctrl+["))
         self.toggle_right = QAction(theme.icon("panel-right", "text"), "Show results panel", self)
+        self.toggle_right.setToolTip(tip("toolbar.toggle_right"))
         self.toggle_right.setShortcut(QKeySequence("Ctrl+]"))
         for action, panel in ((self.toggle_left, self.left_panel),
                               (self.toggle_right, self.right_panel)):
@@ -111,12 +116,15 @@ class MainWindow(QMainWindow):
         bar.addSeparator()
         self.zoom_in_action = QAction(theme.icon("zoom-in", "text"), "Zoom in", self)
         self.zoom_in_action.setShortcut(QKeySequence.StandardKey.ZoomIn)
+        self.zoom_in_action.setToolTip(tip("toolbar.zoom_in"))
         self.zoom_in_action.triggered.connect(lambda: self.current_canvas().zoom_in())
         self.zoom_out_action = QAction(theme.icon("zoom-out", "text"), "Zoom out", self)
         self.zoom_out_action.setShortcut(QKeySequence.StandardKey.ZoomOut)
+        self.zoom_out_action.setToolTip(tip("toolbar.zoom_out"))
         self.zoom_out_action.triggered.connect(lambda: self.current_canvas().zoom_out())
         self.fit_action = QAction(theme.icon("maximize", "text"), "Fit drawing (F)", self)
         self.fit_action.triggered.connect(lambda: self.current_canvas().fit())
+        self.fit_action.setToolTip(tip("toolbar.fit"))
         for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action):
             bar.addAction(action)
 
@@ -127,7 +135,7 @@ class MainWindow(QMainWindow):
             action = QAction(label, self)
             action.setCheckable(True)
             action.setChecked(on)
-            action.setToolTip(f"Show {label.lower()} on the canvas")
+            action.setToolTip(tip("toolbar.layer"))
             action.toggled.connect(lambda v, n=name: self._set_layer(n, v))
             self._set_layer(name, on)
             button = QToolButton()
@@ -136,6 +144,19 @@ class MainWindow(QMainWindow):
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             bar.addWidget(button)
             self.layer_actions[name] = action
+
+        bar.addSeparator()
+        self.explain_action = QAction("Explain", self)
+        self.explain_action.setCheckable(True)
+        self.explain_action.setToolTip(tip("toolbar.explain"))
+        self.explain_action.toggled.connect(self._toggle_explain)
+        self.explain_drawer.close_button.clicked.connect(
+            lambda: self.explain_action.setChecked(False))
+        button = QToolButton()
+        button.setObjectName("layerToggle")
+        button.setDefaultAction(self.explain_action)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        bar.addWidget(button)
 
     def canvases(self):
         return (self.canvas, self.offdesign_tab.canvas)
@@ -153,11 +174,26 @@ class MainWindow(QMainWindow):
         canvas = self.current_canvas()
         self.results_panel.station_table.set_regions(canvas.region_states())
         self.results_panel.show_selection(*canvas.selection, canvas.payload(*canvas.selection))
+        if self.explain_drawer.is_open:
+            self.explain_drawer.show_item(*canvas.selection)
 
     def _on_selection(self, canvas, kind, index, payload):
-        """Results panel and station table follow the canvas of the visible tab."""
+        """Results panel, station table and Explain drawer follow the visible tab's canvas."""
         if canvas is self.current_canvas():
             self.results_panel.show_selection(kind, index, payload)
+            if self.explain_drawer.is_open:
+                self.explain_drawer.show_item(kind, index)
+
+    def _toggle_explain(self, on):
+        if on:
+            self.explain_drawer.show_item(*self.current_canvas().selection)
+            self.explain_drawer.open()
+        else:
+            self.explain_drawer.close_drawer()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.explain_drawer.place()
 
     def _on_picture(self, canvas):
         if canvas is self.current_canvas():
@@ -177,20 +213,25 @@ class MainWindow(QMainWindow):
         self.compute_label = QLabel()
         self.model_label = QLabel()
         self.units_label = QLabel()
+        separator = QLabel("·")
+        for label, key in ((self.compute_label, "status.compute"),
+                           (self.model_label, "status.model"),
+                           (self.units_label, "status.units"), (separator, "status.sep")):
+            label.setToolTip(tip(key))
         status.addWidget(self.compute_label)
         status.addWidget(self.busy)
         status.addPermanentWidget(self.model_label)
-        status.addPermanentWidget(QLabel("·"))
+        status.addPermanentWidget(separator)
         status.addPermanentWidget(self.units_label)
 
     def _update_status(self):
-        ms = self.state.compute_ms
-        if ms is None:
+        s = self.state
+        if s.compute_ms is None:
             text = "Computing…"
-        elif self.state.compute_cached:
-            text = "cached"
         else:
-            text = f"Computed in {ms:.0f} ms"
+            design = "design cached" if s.compute_cached else f"design {s.design_ms:.0f} ms"
+            sweep = f" · sweep {s.sweep_ms:.0f} ms" if s.sweep_ms is not None else ""
+            text = design + sweep
         self.compute_label.setText(text)
         self.model_label.setText(f"Ideal gas, γ = {self.state.inputs.gamma:.2f}")
         self.units_label.setText(self.state.inputs.units)

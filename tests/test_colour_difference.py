@@ -5,7 +5,7 @@ from tests.colour_difference import ciede2000, delta_e
 
 
 # SOURCE: Sharma, Wu & Dalal (2005), Color Res. Appl. 30(1), Table 1, pairs 1, 7 and 17
-# (pending user confirmation, M4 STEP 1).
+# (confirmed by the user in M5, checked against scikit-image's CIEDE2000).
 @pytest.mark.parametrize("lab1, lab2, expected", [
     ((50.0, 2.6772, -79.7751), (50.0, 0.0, -82.7485), 2.0425),
     ((50.0, 0.0, 0.0), (50.0, -1.0, 2.0), 2.3669),

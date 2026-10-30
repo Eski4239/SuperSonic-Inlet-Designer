@@ -91,14 +91,17 @@ class _DesignJob(QRunnable):
         except ValueError as exc:
             out["error"] = str(exc)
         d = out["design"]
+        out["design_ms"], out["sweep_ms"] = (time.perf_counter() - t0) * 1000.0, None
         if d is not None:
             out["cached"] = api._design_cached.cache_info().hits > hits
             off_mach = i.off_design_mach if i.off_design_mach is not None else d.inputs.M
             out["off"], out["off_error"] = _off_point(d, off_mach)
             if d.inputs.n_ramps > 0:          # no off-design model without ramps
+                t1 = time.perf_counter()
                 lo, hi = off_design_range(d.inputs.M)
                 m_det = api.detachment_mach(d)
                 out["sweep"] = api.off_design_sweep(d, max(lo, m_det), hi, SWEEP_POINTS)
+                out["sweep_ms"] = (time.perf_counter() - t1) * 1000.0
         out["ms"] = (time.perf_counter() - t0) * 1000.0
         self.signals.done.emit(self.generation, out)
 
@@ -137,7 +140,10 @@ class AppState(QObject):
         self.off_design_error = None
         self.sweep = None                # api.Sweep of the current design, or None
         self.compute_ms = None
+        self.design_ms = None            # freestream + design (+ off-design point), ms
+        self.sweep_ms = None             # off-design sweep, ms (None: no sweep)
         self.compute_cached = False      # last design came from the api cache
+        self.off_freestream = None       # freestream at the off-design Mach
         self.active_view = "design"
         self._fs_ms = 0.0
         self._generation = 0
@@ -195,34 +201,49 @@ class AppState(QObject):
             self.view_changed.emit(view)
 
     # --- derived quantities ---------------------------------------------
-    def captured_mass_flow(self):
+    def captured_mass_flow(self, at_off_design=False):
+        """Captured mass flow per span at the design Mach, or at the off-design Mach."""
+        if at_off_design:
+            if self.off_freestream is None or self.off_design is None:
+                return None
+            return api.captured_mass_flow(self.off_freestream, self._inputs.capture_height_m,
+                                          self.off_design.mass_capture_ratio)
         if self.freestream is None or self.design is None:
             return None
         return api.captured_mass_flow(self.freestream, self._inputs.capture_height_m,
                                       self.design.mass_capture)
 
     def notices(self):
-        """(level, text, detail) for every current model-limit message; level is "info",
-        "warn" or "error", detail a longer explanation (tooltip) or None. Off-design
-        messages are included while the off-design view is active (duplicates dropped)."""
-        out = []
+        """(group, level, text, detail) for every current model-limit message.
+
+        group "design": freestream + design point; group "off": the off-design point at the
+        slider Mach, only while the off-design view is active. level is "info", "warn" or
+        "error"; detail is a longer explanation (tooltip) or None. Duplicates are dropped
+        within a group."""
+        design = []
         if self.freestream is not None:
-            out.extend(("warn", w, None) for w in self.freestream.warnings)
-        results = [self.design]
+            design.extend(("warn", w, None) for w in self.freestream.warnings)
+        if self.design is not None:
+            design.extend((n.level, n.text, n.detail) for n in self.design.notices)
+        groups = [("design", design)]
         if self.active_view == "offdesign":
-            results.append(self.off_design)
-        for result in results:
-            if result is not None:
-                out.extend((n.level, n.text, n.detail) for n in result.notices)
-        if self.active_view == "offdesign" and self.off_design_error:
-            no_model = self.off_design_error == api._off.NO_RAMPS_MESSAGE
-            out.append(("info" if no_model else "error", self.off_design_error, None))
-        seen, unique = set(), []
-        for n in out:
-            if n[1] not in seen:
-                seen.add(n[1])
-                unique.append(n)
-        return unique
+            off = []
+            if self.off_freestream is not None:
+                off.extend(("warn", w, None) for w in self.off_freestream.warnings)
+            if self.off_design is not None:
+                off.extend((n.level, n.text, n.detail) for n in self.off_design.notices)
+            if self.off_design_error:
+                no_model = self.off_design_error == api._off.NO_RAMPS_MESSAGE
+                off.append(("info" if no_model else "error", self.off_design_error, None))
+            groups.append(("off", off))
+        out = []
+        for group, items in groups:
+            seen = set()
+            for level, text, detail in items:
+                if text not in seen:
+                    seen.add(text)
+                    out.append((group, level, text, detail))
+        return out
 
     def warnings(self):
         out = []
@@ -279,7 +300,10 @@ class AppState(QObject):
         self.off_design, self.off_design_error = out["off"], out["off_error"]
         self.sweep = out["sweep"]
         self.compute_ms = self._fs_ms + out["ms"]
+        self.design_ms = self._fs_ms + out["design_ms"]
+        self.sweep_ms = out["sweep_ms"]
         self.compute_cached = out["cached"]
+        self._update_off_freestream()
         self._set_busy(False)
         self.design_ready.emit(self.design, self.design_error)
         self.off_design_ready.emit(self.off_design, self.off_design_error)
@@ -290,7 +314,24 @@ class AppState(QObject):
         if generation != self._off_generation or out is None or out["design"] is not self.design:
             return                      # stale: a newer slider value or a new design exists
         self.off_design, self.off_design_error = out["off"], out["off_error"]
+        self._update_off_freestream()
         self.off_design_ready.emit(self.off_design, self.off_design_error)
+
+    def _update_off_freestream(self):
+        """Freestream at the off-design Mach (same atmosphere); cheap, UI thread."""
+        self.off_freestream = None
+        if self.off_design is None:
+            return
+        i = self._inputs
+        try:
+            if i.atmosphere_mode == "altitude":
+                self.off_freestream = api.freestream(self.off_design.M_inf,
+                                                     altitude_m=i.altitude_m, gamma=i.gamma)
+            else:
+                self.off_freestream = api.freestream(self.off_design.M_inf, p=i.p_pa, T=i.T_k,
+                                                     gamma=i.gamma)
+        except ValueError:
+            self.off_freestream = None
 
     def _set_busy(self, busy):
         if busy != self._busy:

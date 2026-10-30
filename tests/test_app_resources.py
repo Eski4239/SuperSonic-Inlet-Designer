@@ -47,6 +47,7 @@ def test_pyproject_ships_icons_and_fonts():
     assert "resources/icons/*.svg" in patterns
     assert "resources/fonts/*.ttf" in patterns
     assert "resources/data/*.json" in patterns
+    assert "resources/explain/*.md" in patterns and "resources/explain/*.json" in patterns
 
 
 def test_paths_and_tokens_import_without_qt():

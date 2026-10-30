@@ -20,6 +20,7 @@ from . import isentropic as _isen
 from . import oblique_shock as _obl
 from . import offdesign as _off
 from .geometry import COWL_LIP_PREFIX, build_geometry, cowl_check, design_inlet
+from .offdesign import _deprecated_m_duct
 
 REAL_GAS_T0_LIMIT = 800.0  # K; above this, vibrational excitation makes constant gamma questionable
 SUBSONIC_WARNING = _off.SUBSONIC_WARNING
@@ -48,6 +49,9 @@ class Freestream(_Serialisable):
     mu: float            # Pa s
     Re_per_m: float      # 1/m
     warnings: tuple
+    R: float = None      # J/(kg K), specific gas constant used
+    T0_T: float = None   # stagnation-to-static temperature ratio
+    p0_p: float = None   # stagnation-to-static pressure ratio
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,10 @@ class ShockState(_Serialisable):
     p2_p1: float         # static pressure ratio across the shock
     p0_ratio: float      # p02 / p01 across the shock
     p0_loss: float       # 1 - p02 / p01
+    M2: float = None     # downstream Mach number
+    Mn2: float = None    # downstream shock-normal Mach number, M2 sin(beta - theta)
+    T2_T1: float = None  # static temperature ratio across the shock
+    rho2_rho1: float = None  # density ratio across the shock
 
 
 @dataclass(frozen=True)
@@ -109,7 +117,8 @@ class DesignResult(_Serialisable):
     regions: tuple           # RegionState, freestream first
     recovery_oblique: float
     recovery_total: float
-    M_duct: float
+    M_pre_terminal: float    # behind the last ramp shock, ahead of the terminal normal shock
+    M_post_terminal: float   # behind the terminal shock (= M_pre_terminal if no terminal shock)
     throat_height: float
     cowl_angle_deg: float
     mass_capture: float
@@ -121,6 +130,11 @@ class DesignResult(_Serialisable):
     notices: tuple = ()             # Notice per warning (same order as warnings)
     constrained: bool = False       # True when the max cowl angle limit is active
 
+    @property
+    def M_duct(self):
+        """Deprecated alias of M_post_terminal (its old meaning for a design)."""
+        return _deprecated_m_duct(self.M_post_terminal, "M_post_terminal")
+
 
 @dataclass(frozen=True)
 class OffDesignResult(_Serialisable):
@@ -129,7 +143,7 @@ class OffDesignResult(_Serialisable):
     dx_over_hc: tuple
     mass_capture_ratio: float
     recovery_oblique: float
-    M_duct: float
+    M_pre_terminal: float    # behind the last ramp shock, ahead of the terminal normal shock
     recovery_total: float
     warnings: tuple
     ramp_angles_deg: tuple = ()
@@ -146,6 +160,13 @@ class OffDesignResult(_Serialisable):
     lip_flow_angle_deg: float = None
     cowl_required_turn_deg: float = None   # max(0, cowl - lip flow angle) + lip wedge
     cowl_wedge_deg: float = 0.0
+    M_post_terminal: float = None   # behind the terminal shock (= pre if no terminal shock)
+    theta_max_lip_deg: float = None # theta_max at the lip Mach; None if the lip flow is subsonic
+
+    @property
+    def M_duct(self):
+        """Deprecated alias of M_pre_terminal (its old meaning off design)."""
+        return _deprecated_m_duct(self.M_pre_terminal, "M_pre_terminal")
 
 
 @dataclass(frozen=True)
@@ -203,8 +224,9 @@ def freestream(M, altitude_m=None, p=None, T=None, gamma=1.4):
     rho = p / (R * T)
     a = math.sqrt(gamma * R * T)
     V = M * a
-    T0 = T * float(_isen.stagnation_temperature_ratio(M, gamma))
-    p0 = p * float(_isen.stagnation_pressure_ratio(M, gamma))
+    T0_T = float(_isen.stagnation_temperature_ratio(M, gamma))
+    p0_p = float(_isen.stagnation_pressure_ratio(M, gamma))
+    T0, p0 = T * T0_T, p * p0_p
     mu = float(_atm.dynamic_viscosity(T))
 
     warnings = []
@@ -217,7 +239,7 @@ def freestream(M, altitude_m=None, p=None, T=None, gamma=1.4):
     return Freestream(
         M=float(M), gamma=float(gamma), mode=mode, altitude_m=altitude_m, p=p, T=T,
         rho=rho, a=a, V=V, p0=p0, T0=T0, mu=mu, Re_per_m=rho * V / mu,
-        warnings=tuple(warnings),
+        warnings=tuple(warnings), R=float(R), T0_T=T0_T, p0_p=p0_p,
     )
 
 
@@ -233,12 +255,12 @@ def _validate_custom_angles(M, n_ramps, ramp_angles, gamma):
     Mi = M
     for i, theta in enumerate(angles):
         if not math.isfinite(theta) or theta <= 0:
-            raise ValueError(f"ramp {i + 1}: angle must be > 0 deg (got {theta:g})")
+            raise ValueError(f"ramp {i + 1}: angle must be > 0° (got {theta:g}°)")
         theta_max, _ = _obl.max_deflection(Mi, gamma)
         if theta >= theta_max:
             raise ValueError(
-                f"ramp {i + 1}: {theta:.2f} deg exceeds the detachment limit "
-                f"{float(theta_max):.2f} deg at M = {Mi:.3f}"
+                f"ramp {i + 1}: {theta:.2f}° exceeds the detachment limit "
+                f"{float(theta_max):.2f}° at M = {Mi:.3f}"
             )
         Mi = _obl.oblique_shock_state(Mi, theta, gamma, weak=True)["M2"]
         if Mi <= 1.0 and i < n_ramps - 1:
@@ -256,6 +278,10 @@ def _shock(name, kind, upstream, downstream, beta, theta):
         p2_p1=downstream.p_ratio / upstream.p_ratio,
         p0_ratio=downstream.p0_ratio / upstream.p0_ratio,
         p0_loss=1.0 - downstream.p0_ratio / upstream.p0_ratio,
+        M2=float(downstream.M),
+        Mn2=float(downstream.M * math.sin(math.radians(beta - theta))),
+        T2_T1=downstream.T_ratio / upstream.T_ratio,
+        rho2_rho1=(downstream.p_ratio / downstream.T_ratio) / (upstream.p_ratio / upstream.T_ratio),
     )
 
 
@@ -264,7 +290,7 @@ def _flow_states(M, angles, betas, flow, gamma):
 
     If the flow behind the last ramp is subsonic there is no terminal shock: the duct takes
     that state and recovery_total = recovery_oblique.
-    Returns (regions, shocks, recovery_oblique, recovery_total, M_duct, subsonic).
+    Returns (regions, shocks, recovery_oblique, recovery_total, M_pre, M_post, subsonic).
     """
     ramp_states = _inlet.compress_ramps(M, list(angles), gamma)
     regions = [RegionState("freestream", 0.0, None, float(M), 1.0, 1.0, 1.0)]
@@ -280,18 +306,19 @@ def _flow_states(M, angles, betas, flow, gamma):
 
     subsonic = M_before_terminal < 1.0
     if subsonic:
-        recovery_total, M_duct = recovery_oblique, M_before_terminal
+        recovery_total, M_post = recovery_oblique, M_before_terminal
     else:
         terminal = _inlet.compress(M, list(angles), gamma)[-1]
         recovery_total = float(terminal.p0_ratio)
-        M_duct = float(terminal.M)
+        M_post = float(terminal.M)
         regions.append(
-            RegionState("duct (behind normal shock)", float(flow[-1]), 90.0, M_duct,
+            RegionState("duct (behind normal shock)", float(flow[-1]), 90.0, M_post,
                         float(terminal.p_ratio), float(terminal.T_ratio), recovery_total)
         )
         shocks.append(_shock("terminal normal shock", "normal", regions[-2], regions[-1],
                              90.0, 0.0))
-    return tuple(regions), tuple(shocks), recovery_oblique, recovery_total, M_duct, subsonic
+    return (tuple(regions), tuple(shocks), recovery_oblique, recovery_total,
+            float(M_before_terminal), float(M_post), subsonic)
 
 
 @lru_cache(maxsize=256)
@@ -313,7 +340,7 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None
     for a in angles:
         flow.append(flow[-1] + a)
 
-    regions, shocks, recovery_oblique, recovery_total, M_duct, subsonic = _flow_states(
+    regions, shocks, recovery_oblique, recovery_total, M_pre, M_post, subsonic = _flow_states(
         M, angles, betas, flow, gamma)
     notices = [Notice("warn", SUBSONIC_WARNING)] if subsonic else []
     # the lip's outer surface turns the freestream by the cowl angle plus the lip wedge
@@ -340,7 +367,7 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None
     return DesignResult(
         inputs=inputs, ramp_angles_deg=angles, flow_angles_deg=tuple(flow), betas_deg=betas,
         regions=tuple(regions), recovery_oblique=recovery_oblique,
-        recovery_total=recovery_total, M_duct=M_duct,
+        recovery_total=recovery_total, M_pre_terminal=M_pre, M_post_terminal=M_post,
         throat_height=float(geom.throat_height), cowl_angle_deg=float(geom.cowl_angle_deg),
         mass_capture=1.0, geometry=geometry, warnings=tuple(n.text for n in notices),
         shock_states=shocks, theta_max_freestream_deg=float(theta_max_inf),
@@ -371,12 +398,12 @@ def design(M, n_ramps, capture_height=0.1, gamma=1.4, ramp_angles=None, max_cowl
         angles = _validate_custom_angles(M, n_ramps, ramp_angles, gamma)
     if max_cowl_angle is not None:
         if not math.isfinite(max_cowl_angle) or max_cowl_angle <= 0:
-            raise ValueError(f"max cowl angle must be > 0 deg (got {max_cowl_angle:g})")
+            raise ValueError(f"max cowl angle must be > 0° (got {max_cowl_angle:g}°)")
         max_cowl_angle = round(float(max_cowl_angle), 10)
     if not isinstance(cowl_wedge, (int, float)) or not math.isfinite(cowl_wedge) \
             or not 0.0 <= cowl_wedge <= MAX_COWL_WEDGE_DEG:
         raise ValueError(
-            f"cowl lip wedge must be 0-{MAX_COWL_WEDGE_DEG:g} deg (got {cowl_wedge!r})")
+            f"cowl lip wedge must be 0-{MAX_COWL_WEDGE_DEG:g}° (got {cowl_wedge!r})")
     # Round the cache key so float noise from sliders/unit conversions reuses entries.
     return _design_cached(round(float(M), 10), n_ramps, round(float(capture_height), 12),
                           round(float(gamma), 10), angles, max_cowl_angle,
@@ -413,7 +440,8 @@ def _convert_off(r, design_result):
         M_inf=float(r.M_inf), regime=r.regime,
         dx_over_hc=tuple(float(d) for d in r.dx_over_hc),
         mass_capture_ratio=float(r.mass_capture_ratio),
-        recovery_oblique=float(r.recovery_oblique), M_duct=float(r.M_duct),
+        recovery_oblique=float(r.recovery_oblique), M_pre_terminal=float(r.M_pre_terminal),
+        M_post_terminal=float(r.M_post_terminal), theta_max_lip_deg=_f(r.theta_max_lip_deg),
         recovery_total=float(r.recovery_total), warnings=tuple(r.warnings),
         ramp_angles_deg=angles, betas_deg=betas, regions=regions, shock_states=shocks,
         capture_streamline=tuple(_pt(p) for p in r.capture_streamline),

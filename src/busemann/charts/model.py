@@ -18,6 +18,7 @@ CFD_DESIGN = dict(M=3.0, n_ramps=2, method="oswatitsch", gamma=1.4)
 CFD_MACH_TOL = 1e-6
 CFD_GAMMA_TOL = 1e-9
 CFD_NOTE = "CFD validation available for the M3 2-ramp design only"
+CFD_WEDGE_NOTE = "CFD validation used a zero-thickness cowl"
 
 
 @dataclass(frozen=True)
@@ -33,15 +34,27 @@ def load_cfd():
     return json.loads(resource_path("data", "cfd_phase3d.json").read_text(encoding="utf-8"))
 
 
-def cfd_applies(design):
-    """True when `design` is the validated case: M 3.0, 2 ramps, Oswatitsch, gamma 1.4,
-    not cowl-constrained. (The lip wedge changes neither capture nor recovery.)"""
-    if design is None:
-        return False
+def _validated_geometry(design):
     i = design.inputs
     return (abs(i.M - CFD_DESIGN["M"]) <= CFD_MACH_TOL and i.n_ramps == CFD_DESIGN["n_ramps"]
             and i.method == CFD_DESIGN["method"]
             and abs(i.gamma - CFD_DESIGN["gamma"]) <= CFD_GAMMA_TOL and not design.constrained)
+
+
+def cfd_applies(design):
+    """True when `design` is the validated case: M 3.0, 2 ramps, Oswatitsch, gamma 1.4,
+    not cowl-constrained, zero-thickness cowl (wedge 0, as in the Phase 3d CFD)."""
+    return (design is not None and _validated_geometry(design)
+            and not (design.inputs.cowl_wedge_deg or 0.0))
+
+
+def cfd_note(design):
+    """Why the CFD overlay is hidden (None when it is shown)."""
+    if cfd_applies(design):
+        return None
+    if design is not None and _validated_geometry(design):
+        return CFD_WEDGE_NOTE                 # only the lip wedge differs
+    return CFD_NOTE
 
 
 def ordinal(n):

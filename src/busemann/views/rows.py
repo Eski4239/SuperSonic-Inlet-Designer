@@ -12,7 +12,7 @@ def region_rows(st, fs, system):
         ("p_ratio", "p/p∞", st.p_ratio, fmt.sig(st.p_ratio, 4), ""),
         ("T_ratio", "T/T∞", st.T_ratio, fmt.sig(st.T_ratio, 4), ""),
         ("p0_ratio", "p0/p0∞", st.p0_ratio, f"{st.p0_ratio:.4f}", ""),
-        ("flow_angle", "Flow angle", st.theta_deg, f"{st.theta_deg:.2f}", "deg"),
+        ("flow_angle", "Flow angle", st.theta_deg, f"{st.theta_deg:.2f}", "°"),
     ]
     if fs is not None:
         p, T = st.p_ratio * fs.p, st.T_ratio * fs.T
@@ -25,10 +25,18 @@ def region_rows(st, fs, system):
     return rows
 
 
+def cowl_rows(sk):
+    """Rows for the cowl (a canvas Skeleton): cowl angle and lip wedge."""
+    return [
+        ("cowl_angle", "Cowl angle", sk.phi_n, f"{sk.phi_n:.2f}", "°"),
+        ("lip_wedge", "Lip wedge", sk.cowl_wedge_deg, f"{sk.cowl_wedge_deg:.2f}", "°"),
+    ]
+
+
 def shock_rows(sh):
     return [
-        ("beta", "β", sh.beta_deg, f"{sh.beta_deg:.2f}", "deg"),
-        ("theta", "θ", sh.theta_deg, f"{sh.theta_deg:.2f}", "deg"),
+        ("beta", "β", sh.beta_deg, f"{sh.beta_deg:.2f}", "°"),
+        ("theta", "θ", sh.theta_deg, f"{sh.theta_deg:.2f}", "°"),
         ("M1", "M1", sh.M1, f"{sh.M1:.4f}", ""),
         ("Mn1", "M_n1", sh.Mn1, f"{sh.Mn1:.4f}", ""),
         ("p2_p1", "p2/p1", sh.p2_p1, fmt.sig(sh.p2_p1, 4), ""),

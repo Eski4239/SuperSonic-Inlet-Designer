@@ -6,13 +6,14 @@ from ..theme import qt as theme
 
 
 class CollapsibleSection(QWidget):
-    def __init__(self, title, content, collapsed=True, parent=None):
+    def __init__(self, title, content, collapsed=True, tooltip="", parent=None):
         super().__init__(parent)
         self.toggle = QToolButton()
         self.toggle.setObjectName("sectionToggle")
         self.toggle.setText(theme.caps(title))
         self.toggle.setFont(theme.label_font())
         self.toggle.setCheckable(True)
+        self.toggle.setToolTip(tooltip)
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.content = content
 

@@ -10,6 +10,7 @@ from ..widgets import CollapsibleSection, NumberField, SegmentedControl, field_l
 from . import format as fmt
 from .ramp_table import RampTable
 from .readout import Readout
+from ..tooltips import attach, tip
 
 MAX_RAMPS = 4
 DEFAULT_CUSTOM_ANGLE = 8.0
@@ -25,13 +26,11 @@ class DesignPanel(QWidget):
 
         self.ramps = SegmentedControl([(str(n), str(n)) for n in range(MAX_RAMPS + 1)],
                                       str(i.n_ramps))
-        self.ramps.setToolTip("Number of external compression ramps (oblique shocks).")
+        self.ramps.setToolTip(tip("design.ramps"))
         self.method = SegmentedControl(
             [("oswatitsch", "Oswatitsch optimum"), ("custom", "Custom angles")], i.method
         )
-        self.method.setToolTip(
-            "Oswatitsch: equal-strength oblique shocks that maximise total pressure recovery."
-        )
+        self.method.setToolTip(tip("design.method"))
 
         self.custom_box = QWidget()
         custom_form = _form(self.custom_box)
@@ -39,73 +38,67 @@ class DesignPanel(QWidget):
         self.angle_labels = []
         for k in range(MAX_RAMPS):
             field = NumberField(DEFAULT_CUSTOM_ANGLE, decimals=2, minimum=0.0, maximum=60.0,
-                                min_exclusive=True, unit="deg")
-            field.setToolTip(f"Incremental flow deflection of ramp {k + 1}.")
-            label = field_label(f"θ{k + 1}")
+                                min_exclusive=True, unit="°")
+            attach(field, "field.custom_angle")
+            label = field_label(f"θ{k + 1}", "field.custom_angle")
             custom_form.addRow(label, field)
             field.value_changed.connect(lambda _v: self._push_custom_angles())
             self.angle_fields.append(field)
             self.angle_labels.append(label)
         self.custom_error = QLabel()
         self.custom_error.setObjectName("fieldError")
+        self.custom_error.setToolTip(tip("design.custom_error"))
         self.custom_error.setWordWrap(True)
         self.custom_error.hide()
 
         self.capture = NumberField(i.capture_height_m, minimum=0.0, min_exclusive=True)
-        self.capture.setToolTip("Capture height h_c: cowl-lip height above the ramp leading edge.")
+        attach(self.capture, "field.capture_height")
 
         # Advanced: optional limit on the cowl angle of the Oswatitsch optimum (off by default).
         self.max_cowl_check = QCheckBox("Max cowl angle")
-        self.max_cowl_check.setToolTip(
-            "Limit the total turning (cowl angle) of the Oswatitsch optimum, e.g. to keep the "
-            "external cowl shock attached. Costs recovery when active.")
+        self.max_cowl_check.setToolTip(tip("design.max_cowl"))
         self.max_cowl = NumberField(i.max_cowl_deg, decimals=1, minimum=0.0, maximum=90.0,
-                                    min_exclusive=True, unit="deg")
+                                    min_exclusive=True, unit="°")
         self.wedge = NumberField(i.cowl_wedge_deg, decimals=1, minimum=0.0, maximum=30.0,
-                                 unit="deg")
-        self.wedge.setToolTip(
-            "Outer-surface wedge angle at the cowl lip, added to the turn the cowl imposes on "
-            "the flow at the lip. 0° = zero-thickness idealisation.")
+                                 unit="°")
+        attach(self.wedge, "field.wedge")
+        attach(self.max_cowl, "field.max_cowl")
         advanced_box = QWidget()
         grid = QFormLayout(advanced_box)
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(tokens.space(1))
         grid.setVerticalSpacing(tokens.space(1))
         grid.addRow(self.max_cowl_check, self.max_cowl)
-        wedge_label = field_label("Cowl lip wedge")
-        wedge_label.setToolTip(self.wedge.toolTip())
-        grid.addRow(wedge_label, self.wedge)
-        self.advanced = CollapsibleSection("Advanced", advanced_box, collapsed=True)
+        grid.addRow(field_label("Cowl lip wedge", "label.cowl_lip_wedge"), self.wedge)
+        self.advanced = CollapsibleSection("Advanced", advanced_box, collapsed=True,
+                                           tooltip=tip("design.advanced"))
 
         self.ramp_table = RampTable()
-        self.ramp_table.setToolTip("Per ramp: incremental deflection θ, shock angle β (relative "
-                                   "to the local flow) and the Mach number behind the shock.")
+        self.ramp_table.setToolTip(tip("ramp_table.row"))
         self.readout = Readout([
-            ("throat", "Throat height", "length", "Lip to terminal-shock foot distance."),
-            ("cowl", "Cowl angle", None, "Cowl / duct direction from the freestream axis."),
-            ("margin", "Cowl margin", None,
-             "θ_max(M∞) − (cowl angle + lip wedge): below 0 the external cowl shock "
-             "detaches."),
+            ("throat", "Throat height", "length", "readout.throat"),
+            ("cowl", "Cowl angle", None, "readout.cowl"),
+            ("margin", "Cowl margin", None, "readout.margin"),
         ])
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(tokens.space(1))
         form.setVerticalSpacing(tokens.space(1))
-        form.addRow(field_label("Ramps"), self.ramps)
-        form.addRow(field_label("Capture height"), self.capture)
+        form.addRow(field_label("Ramps", "label.ramps"), self.ramps)
+        form.addRow(field_label("Capture height", "label.capture_height"), self.capture)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.space(2), tokens.space(2), tokens.space(2), tokens.space(2))
         layout.setSpacing(tokens.space(1) + 4)
-        layout.addWidget(section_title("Design"))
+        layout.addWidget(section_title("Design", "section.design"))
         layout.addLayout(form)
-        layout.addWidget(field_label("Method"))
+        layout.addWidget(field_label("Method", "label.method"))
         layout.addWidget(self.method)
         layout.addWidget(self.custom_box)
         layout.addWidget(self.custom_error)
         layout.addWidget(self.advanced)
-        layout.addWidget(field_label("Geometry"))
+        layout.addWidget(field_label("Geometry", "label.geometry"))
         layout.addWidget(self.ramp_table)
         layout.addWidget(self.readout)
 
@@ -185,8 +178,8 @@ class DesignPanel(QWidget):
             for k, (theta, beta) in enumerate(zip(result.ramp_angles_deg, result.betas_deg))
         ])
         self.readout.set_si("throat", result.throat_height, system)
-        self.readout.set_text("cowl", f"{result.cowl_angle_deg:.2f}", "deg")
-        self.readout.set_text("margin", f"{result.cowl_margin_deg:+.2f}", "deg")
+        self.readout.set_text("cowl", f"{result.cowl_angle_deg:.2f}", "°")
+        self.readout.set_text("margin", f"{result.cowl_margin_deg:+.2f}", "°")
 
     def _show_error(self, error):
         """Route a core error to the ramp field it names, else show it under the method."""

@@ -42,7 +42,7 @@ def equal_strength_ramps(M_inf, n_ramps, Mn, gamma=1.4):
         if beta_deg > beta_at_theta_max:
             raise ValueError(
                 f"Mn={Mn} at M={M} requires beta={beta_deg:.4f} deg, which is on the "
-                f"strong branch (beta_at_theta_max={beta_at_theta_max:.4f} deg); "
+                f"strong branch (β at θ_max = {beta_at_theta_max:.4f}°); "
                 "equal-strength ramps require weak, attached shocks"
             )
         theta_deg = obl.theta_from_beta(M, beta_deg, gamma)

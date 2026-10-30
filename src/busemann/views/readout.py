@@ -6,12 +6,14 @@ from inletdesign import units as _units
 
 from ..theme import qt as theme
 from ..theme import tokens
+from ..tooltips import tip
 from . import format as fmt
 
 
 class Readout(QWidget):
     def __init__(self, rows, parent=None):
-        """rows: list of (key, label, quantity or None, tooltip). quantity selects units."""
+        """rows: list of (key, label, quantity or None, tooltip key). quantity selects units;
+        the tooltip (tooltips.json) is shared by the row's label, value and unit."""
         super().__init__(parent)
         self._rows = {}
         grid = QGridLayout(self)
@@ -19,7 +21,8 @@ class Readout(QWidget):
         grid.setHorizontalSpacing(tokens.space(1))
         grid.setVerticalSpacing(4)
         grid.setColumnStretch(1, 1)
-        for r, (key, label, quantity, tooltip) in enumerate(rows):
+        for r, (key, label, quantity, tip_key) in enumerate(rows):
+            tooltip = tip(tip_key)
             name = QLabel(label)
             name.setObjectName("readoutLabel")
             name.setToolTip(tooltip)
@@ -33,6 +36,8 @@ class Readout(QWidget):
             unit.setObjectName("readoutUnit")
             unit.setFont(theme.mono_font(tokens.SIZE_LABEL))
             unit.setMinimumWidth(tokens.space(7))
+            value.setToolTip(tooltip)
+            unit.setToolTip(tooltip)
             grid.addWidget(name, r, 0)
             grid.addWidget(value, r, 1)
             grid.addWidget(unit, r, 2)

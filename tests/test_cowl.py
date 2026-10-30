@@ -25,7 +25,7 @@ def test_m3_two_ramp_is_near_detachment():
     assert d.cowl_margin_deg == pytest.approx(d.theta_max_freestream_deg - d.cowl_angle_deg)
     [notice] = _cowl_notices(d)
     assert notice.level == "warn"
-    assert notice.text == f"Cowl near shock detachment (margin {d.cowl_margin_deg:.2f} deg)"
+    assert notice.text == f"Cowl near shock detachment (margin {d.cowl_margin_deg:.2f}°)"
 
 
 def test_x15_four_ramp_cowl_is_detached():
@@ -33,8 +33,8 @@ def test_x15_four_ramp_cowl_is_detached():
     assert d.cowl_margin_deg < 0
     [notice] = _cowl_notices(d)
     assert notice.level == "error"
-    assert notice.text.startswith("External cowl shock detached (cowl turns 59.50 deg, "
-                                  f"θ_max = {d.theta_max_freestream_deg:.2f} deg at M∞ = 6.70)")
+    assert notice.text.startswith("External cowl shock detached (cowl turns 59.50°, "
+                                  f"θ_max = {d.theta_max_freestream_deg:.2f}° at M∞ = 6.70)")
     assert "bow shock, spillage and cowl drag not modelled" in notice.text
 
 

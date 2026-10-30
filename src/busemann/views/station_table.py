@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QAbstractItemView, QHeaderView, QTableWidget, QTab
 
 from ..theme import qt as theme
 from ..theme import tokens
+from ..tooltips import tip
 
 # (header shown, TSV header, RegionState attribute, format)
 COLUMNS = (
@@ -19,7 +20,7 @@ COLUMNS = (
     ("p/p∞", "p/p_inf", "p_ratio", "ratio"),
     ("T/T∞", "T/T_inf", "T_ratio", "ratio"),
     ("p0/p0∞", "p0/p0_inf", "p0_ratio", "{:.4f}"),
-    ("φ°", "flow angle (deg)", "theta_deg", "{:.1f}"),
+    ("φ°", "flow angle (°)", "theta_deg", "{:.1f}"),
 )
 ROW_H = 22
 CELL_PAD = 10         # px added to the widest text (covers the style's cell margins)
@@ -48,8 +49,8 @@ class StationTable(QTableWidget):
         super().__init__(0, len(COLUMNS), parent)
         self.setObjectName("stationTable")
         self.setHorizontalHeaderLabels([c[0] for c in COLUMNS])
-        for c, (_, tsv, _, _) in enumerate(COLUMNS):
-            self.horizontalHeaderItem(c).setToolTip(tsv)
+        for c, (_, _, attr, _) in enumerate(COLUMNS):
+            self.horizontalHeaderItem(c).setToolTip(tip(f"stations.{attr}"))
         self.horizontalHeaderItem(0).setTextAlignment(Qt.AlignmentFlag.AlignLeft
                                                       | Qt.AlignmentFlag.AlignVCenter)
         self.verticalHeader().hide()
@@ -104,16 +105,37 @@ class StationTable(QTableWidget):
         self._fit_columns()
         self._fit_height()
 
-    def _fit_columns(self):
-        """Numeric columns exactly as wide as their widest text (cell or header)."""
+    def needed_width(self, col):
+        """Width (px) column `col` needs: widest cell or header text plus the cell margin."""
         self.ensurePolished()                        # QSS sets the table font
         self.horizontalHeader().ensurePolished()
         cell_fm, head_fm = self.fontMetrics(), self.horizontalHeader().fontMetrics()
+        texts = [self.item(r, col).text() for r in range(self.rowCount()) if self.item(r, col)]
+        return max([cell_fm.horizontalAdvance(t) for t in texts]
+                   + [head_fm.horizontalAdvance(COLUMNS[col][0])]) + CELL_PAD
+
+    def _fit_columns(self):
+        """Numeric columns exactly as wide as their widest text (cell or header); the
+        region column takes the rest (it stretches)."""
         for c in range(1, len(COLUMNS)):
-            texts = [self.item(r, c).text() for r in range(self.rowCount())]
-            width = max([cell_fm.horizontalAdvance(t) for t in texts]
-                        + [head_fm.horizontalAdvance(COLUMNS[c][0])])
-            self.setColumnWidth(c, width + CELL_PAD)
+            self.setColumnWidth(c, self.needed_width(c))
+
+    def column_overflow(self):
+        """[(column, needed px, available px)] for every column that would clip its text."""
+        problems = [(c, self.needed_width(c), self.columnWidth(c))
+                    for c in range(len(COLUMNS)) if self.columnWidth(c) < self.needed_width(c)]
+        total = sum(self.needed_width(c) for c in range(len(COLUMNS)))
+        if total > self.viewport().width():
+            problems.append(("all", total, self.viewport().width()))
+        return problems
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_columns()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fit_columns()
 
     def _fit_height(self):
         self.setFixedHeight(self.horizontalHeader().sizeHint().height()

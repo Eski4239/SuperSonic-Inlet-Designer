@@ -49,8 +49,11 @@ def clipped_widgets(window):
 
 
 def panel_overflow(window):
-    """Side-panel content wider than its scroll viewport (would be cut off on the right)."""
-    problems = []
+    """Side-panel content wider than its scroll viewport (would be cut off on the right),
+    and station-table columns too narrow for their text."""
+    problems = [{"widget": "StationTable", "name": f"column {c}", "size": [have, 0],
+                 "min_hint": [need, 0]}
+                for c, need, have in window.results_panel.station_table.column_overflow()]
     for panel in (window.left_panel, window.right_panel):
         body = panel.widget()
         if body.minimumSizeHint().width() > panel.viewport().width() + 1:
@@ -76,7 +79,8 @@ def main():
     problems = clipped_widgets(window) + panel_overflow(window)
     window.tabs.setCurrentWidget(window.offdesign_tab)       # the off-design tab too
     settle()
-    problems += [dict(p, tab="Off-design") for p in clipped_widgets(window)]
+    problems += [dict(p, tab="Off-design")
+                 for p in clipped_widgets(window) + panel_overflow(window)]
     result = {"dpr": window.devicePixelRatioF(), "size": [window.width(), window.height()],
               "problems": problems}
     if len(sys.argv) > 2:

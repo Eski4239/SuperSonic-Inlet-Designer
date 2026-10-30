@@ -175,7 +175,7 @@ def test_sweep_near_detachment_never_raises_unexpectedly():
         except ValueError as exc:
             assert "shock detached" in str(exc)
             continue
-        if r.M_duct < 1.0:
+        if r.M_pre_terminal < 1.0:
             n_subsonic += 1
             assert SUBSONIC_WARNING in r.warnings
             assert r.recovery_total == r.recovery_oblique

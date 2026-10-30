@@ -68,7 +68,7 @@ def test_above_design_mach_shocks_enter_the_cowl():
 
 def test_subsonic_behind_last_ramp_has_no_terminal_shock():
     d = api.design(3.0, 2)
-    M = next(m / 1000 for m in range(2390, 2410) if api.off_design_point(d, m / 1000).M_duct < 1)
+    M = next(m / 1000 for m in range(2390, 2410) if api.off_design_point(d, m / 1000).M_pre_terminal < 1)
     pic = P.build(P.skeleton_from(d, api.off_design_point(d, M)))
     assert [s.kind for s in pic.shocks] == ["oblique", "oblique"]
     assert len(pic.regions) == 4

@@ -404,6 +404,9 @@ class InletScene(QGraphicsScene):
             path.closeSubpath()
         elif kind == "shock" and index < len(pic.shocks):
             path = _path([pic.shocks[index].start, pic.shocks[index].end])
+        elif kind == "cowl":
+            path = _path(pic.cowl_body)
+            path.closeSubpath()
         else:
             self.selection_item.hide()
             return

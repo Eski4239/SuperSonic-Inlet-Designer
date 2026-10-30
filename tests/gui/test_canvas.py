@@ -276,7 +276,7 @@ def test_error_card_wraps_with_non_breaking_spaces(qtbot, window):
     with qtbot.waitSignal(window.state.design_ready, timeout=5000):
         window.state.update(method="custom", custom_angles=(12.0, 40.0))
     overlay = window.canvas.overlay
-    assert "M = " in overlay.text() and " deg" in overlay.text()
+    assert "M = " in overlay.text() and "°" in overlay.text()
     assert overlay.width() <= 480
     assert overlay.height() >= overlay.heightForWidth(overlay.width())
 
@@ -339,8 +339,10 @@ def test_adjacent_mach_bins_are_distinguishable(min_M, M_inf):
 
 def test_one_notice_card_per_severity_in_order(qtbot, window):
     panel = window.results_panel
-    panel._set_warnings([("info", "a note", None), ("warn", "first warning", None),
-                         ("error", "an error", "why"), ("warn", "second warning", None)])
+    panel._set_warnings([("design", "info", "a note", None),
+                         ("design", "warn", "first warning", None),
+                         ("design", "error", "an error", "why"),
+                         ("design", "warn", "second warning", None)])
     assert panel.card_levels() == ["error", "warn", "info"]
     assert panel.warning_texts() == ["An error", "First warning", "Second warning", "A note"]
     assert panel.warning_levels() == ["error", "warn", "warn", "info"]

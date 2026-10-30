@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -100,7 +102,7 @@ def test_panels_collapse(window):
 def test_status_bar(window):
     # the start-up design may already be in the api cache from an earlier test
     text = window.compute_label.text()
-    assert text == "cached" or (text.startswith("Computed in") and text.endswith(" ms"))
+    assert re.fullmatch(r"design (cached|\d+ ms) · sweep \d+ ms", text), text
     assert window.model_label.text() == "Ideal gas, γ = 1.40"
 
 
@@ -121,10 +123,11 @@ def test_status_says_cached_on_a_cache_hit(qtbot, window):
         window.state.update(mach=3.137)
     with qtbot.waitSignal(window.state.design_ready, timeout=5000):
         window.state.update(mach=3.0)                     # computed at start-up: cached
-    assert window.compute_label.text() == "cached"
+    assert window.compute_label.text().startswith("design cached · sweep ")
     assert window.state.compute_cached
     api._design_cached.cache_clear()
     with qtbot.waitSignal(window.state.design_ready, timeout=5000):
         window.state.update(mach=3.137)
-    assert window.compute_label.text().startswith("Computed in")     # cache was cleared
+    assert re.fullmatch(r"design \d+ ms · sweep \d+ ms",           # cache was cleared
+                        window.compute_label.text())
     assert not window.state.compute_cached

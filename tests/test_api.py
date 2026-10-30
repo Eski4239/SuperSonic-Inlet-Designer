@@ -76,7 +76,7 @@ def test_design_matches_core(M, n):
     states = _inlet.compress(M, geom.ramp_angles_deg)
     assert r.ramp_angles_deg == pytest.approx(geom.ramp_angles_deg)
     assert r.recovery_total == pytest.approx(states[-1].p0_ratio)
-    assert r.M_duct == pytest.approx(states[-1].M)
+    assert r.M_post_terminal == pytest.approx(states[-1].M)
     assert r.throat_height == pytest.approx(geom.throat_height)
     assert r.cowl_angle_deg == pytest.approx(geom.cowl_angle_deg)
     assert len(r.regions) == n + 2  # freestream, n ramp regions, duct
@@ -126,7 +126,7 @@ def test_design_custom_subsonic_behind_last_ramp():
     r = api.design(2.0, 1, ramp_angles=[theta])
     assert api.SUBSONIC_WARNING in r.warnings
     assert r.recovery_total == r.recovery_oblique
-    assert r.M_duct == pytest.approx(M2)
+    assert r.M_post_terminal == r.M_pre_terminal == pytest.approx(M2)
 
 
 # --- off-design -------------------------------------------------------------
@@ -204,3 +204,35 @@ def test_off_design_at_design_mach_reproduces_design_states():
     for a, b in zip(r.regions, d.regions):
         assert a.M == pytest.approx(b.M, rel=1e-9)
     assert r.betas_deg == pytest.approx(d.betas_deg, abs=1e-9)
+
+
+# --- M5: M_duct renamed (deprecated alias for one milestone) ------------------------
+
+def test_pre_and_post_terminal_mach_and_deprecated_alias():
+    d = api.design(3.0, 2)
+    assert d.M_pre_terminal == pytest.approx(d.regions[-2].M)        # behind ramp shock 2
+    assert d.M_post_terminal == pytest.approx(d.regions[-1].M)       # behind terminal shock
+    assert d.M_post_terminal < 1.0 < d.M_pre_terminal
+    with pytest.warns(DeprecationWarning, match="M_post_terminal"):
+        assert d.M_duct == d.M_post_terminal                         # old design meaning
+    off = api.off_design_point(d, 2.5)
+    assert off.M_pre_terminal == pytest.approx(off.regions[-2].M)
+    assert off.M_post_terminal == pytest.approx(off.regions[-1].M)
+    with pytest.warns(DeprecationWarning, match="M_pre_terminal"):
+        assert off.M_duct == off.M_pre_terminal                      # old off-design meaning
+    for r in (d, off):
+        data = r.to_dict()
+        assert {"M_pre_terminal", "M_post_terminal"} <= set(data) and "M_duct" not in data
+
+
+def test_shock_and_freestream_explain_fields_are_consistent():
+    """Closed-form identities between the M5 fields and the existing ones."""
+    d = api.design(3.0, 2)
+    for s, up, down in zip(d.shock_states, d.regions, d.regions[1:]):
+        assert s.M2 == down.M
+        assert s.Mn2 == pytest.approx(down.M * math.sin(math.radians(s.beta_deg - s.theta_deg)))
+        assert s.p2_p1 == pytest.approx(s.rho2_rho1 * s.T2_T1)          # ideal gas
+        assert s.T2_T1 == pytest.approx(down.T_ratio / up.T_ratio)
+    fs = api.freestream(3.0, altitude_m=20000.0)
+    assert fs.T0 == pytest.approx(fs.T * fs.T0_T) and fs.p0 == pytest.approx(fs.p * fs.p0_p)
+    assert fs.a == pytest.approx(math.sqrt(fs.gamma * fs.R * fs.T))

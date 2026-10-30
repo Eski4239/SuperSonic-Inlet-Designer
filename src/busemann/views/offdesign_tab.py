@@ -11,6 +11,7 @@ from ..charts.offdesign_charts import OffDesignCharts
 from ..state import off_design_range
 from ..theme import qt as theme
 from ..theme import tokens
+from ..tooltips import attach, tip
 from ..widgets import LabeledSlider, section_title
 
 # regime -> (badge text, one-line explanation)
@@ -29,11 +30,11 @@ EMPTY = "—"
 class OffDesignCard(QFrame):
     """Values at the slider Mach, each with its difference from the design point."""
 
-    ROWS = (("capture", "Capture", "Mass capture A0/Ac"),
-            ("recovery", "Recovery", "Total pressure recovery p0/p0∞"),
-            ("M_duct", "Duct M", "Mach number entering the subsonic duct"),
-            ("margin", "Margin", "Local cowl margin at the lip, deg"),
-            ("regime", "Regime", ""))
+    ROWS = (("capture", "Capture", "offcard.capture"),
+            ("recovery", "Recovery", "offcard.recovery"),
+            ("M_duct", "Duct M", "offcard.M_duct"),
+            ("margin", "Margin", "offcard.margin"),
+            ("regime", "Regime", "offcard.regime"))
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,16 +44,17 @@ class OffDesignCard(QFrame):
                                 tokens.space(1) + 4)
         grid.setHorizontalSpacing(tokens.space(1))
         grid.setVerticalSpacing(4)
-        grid.addWidget(section_title("At slider Mach"), 0, 0, 1, 3)
+        grid.addWidget(section_title("At slider Mach", "section.at_slider_mach"), 0, 0, 1, 3)
         head = QLabel("Δ vs design")
+        head.setToolTip(tip("offcard.delta"))
         head.setObjectName("muted")
         head.setAlignment(Qt.AlignmentFlag.AlignRight)
         grid.addWidget(head, 0, 2)
         self.values, self.deltas = {}, {}
-        for r, (key, label, unit) in enumerate(self.ROWS, start=1):
+        for r, (key, label, tip_key) in enumerate(self.ROWS, start=1):
             name = QLabel(label)
             name.setObjectName("readoutLabel")
-            name.setToolTip(unit)
+            name.setToolTip(tip(tip_key))
             value = QLabel(EMPTY)
             value.setObjectName("readoutValue")
             if key != "regime":
@@ -63,6 +65,8 @@ class OffDesignCard(QFrame):
             delta.setFont(theme.mono_font(tokens.SIZE_LABEL))
             delta.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             delta.setMinimumWidth(tokens.space(8))
+            value.setToolTip(tip(tip_key))
+            delta.setToolTip(tip("offcard.delta"))
             grid.addWidget(name, r, 0)
             if key == "regime":                       # words, no delta: use both columns
                 grid.addWidget(value, r, 1, 1, 2)
@@ -85,17 +89,16 @@ class OffDesignCard(QFrame):
         put("capture", f"{off.mass_capture_ratio:.3f}", f"{off.mass_capture_ratio - 1.0:+.3f}")
         put("recovery", f"{off.recovery_total:.4f}",
             f"{off.recovery_total - design.recovery_total:+.4f}")
-        # Mach entering the subsonic duct (behind the terminal shock, if any), as in the
-        # design KPI; OffDesignResult.M_duct is the Mach ahead of the terminal shock.
-        m_duct = off.regions[-1].M if off.regions else off.M_duct
-        put("M_duct", f"{m_duct:.3f}", f"{m_duct - design.M_duct:+.3f}")
+        # Mach entering the subsonic duct (behind the terminal shock, if any)
+        m_duct = off.M_post_terminal
+        put("M_duct", f"{m_duct:.3f}", f"{m_duct - design.M_post_terminal:+.3f}")
         if off.cowl_margin_deg is None:
             put("margin", EMPTY)
             self.values["margin"].setToolTip("Subsonic flow at the lip: no cowl shock.")
         else:
             put("margin", f"{off.cowl_margin_deg:+.2f}",
                 f"{off.cowl_margin_deg - design.cowl_margin_deg:+.2f}")
-            self.values["margin"].setToolTip("")
+            self.values["margin"].setToolTip(tip("offcard.margin"))
         put("regime", REGIMES[regime][0])
 
     def text(self, key):
@@ -113,9 +116,11 @@ class OffDesignTab(QWidget):
 
         self.chip = QLabel()
         self.chip.setObjectName("chip")
+        self.chip.setToolTip(tip("offdesign.chip"))
         lo, hi = off_design_range(state.inputs.mach)
         self.slider = LabeledSlider("Off-design Mach", lo, hi, 0.01, state.inputs.mach)
-        self.slider.setToolTip("Flight Mach number at which the frozen design is evaluated.")
+        self.slider.label.setToolTip(tip("label.off_design_mach"))
+        attach(self.slider, "field.off_design_mach")
         self.badge = QLabel()
         self.badge.setObjectName("regimeBadge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -189,9 +194,9 @@ class OffDesignTab(QWidget):
         off, error = self.state.off_design, self.state.off_design_error
         regime = "detached" if error and "shock detached" in error else (
             off.regime if off is not None else None)
-        text, tip = REGIMES.get(regime, (EMPTY, ""))
+        text, explanation = REGIMES.get(regime, (EMPTY, ""))
         self.badge.setText(text)
-        self.badge.setToolTip(tip)
+        self.badge.setToolTip(explanation or tip("offdesign.badge"))
         self.badge.setProperty("regime", regime or "")
         self.badge.style().unpolish(self.badge)
         self.badge.style().polish(self.badge)

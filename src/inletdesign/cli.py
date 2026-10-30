@@ -58,7 +58,7 @@ def _handle_design(args):
     recovery = states[-1].p0_ratio if states else 1.0
 
     print(f"Design: M_inf={args.mach:.3f}  ramps={args.ramps}")
-    print(f"{'ramp':>6} {'incr deg':>10} {'cumul deg':>10} {'beta deg':>10}")
+    print(f"{'ramp':>6} {'incr (°)':>10} {'cumul (°)':>10} {'beta (°)':>10}")
     for i in range(args.ramps):
         beta = geom.betas_deg[i]
         print(
@@ -214,7 +214,7 @@ def _handle_offdesign(args):
 
     header = (
         f"{'M_inf':>8} {'regime':>14} {'dx/h_c':>24} {'A0/Ac':>10} "
-        f"{'rec_obl':>10} {'M_duct':>10} {'rec_tot':>10}  warnings"
+        f"{'rec_obl':>10} {'M_pre_term':>11} {'M_post_term':>11} {'rec_tot':>10}  warnings"
     )
     print(header)
     for r in results:
@@ -222,7 +222,8 @@ def _handle_offdesign(args):
         warn_str = "; ".join(r.warnings)
         print(
             f"{r.M_inf:>8.3f} {r.regime:>14} {dx_str:>24} {r.mass_capture_ratio:>10.4f} "
-            f"{r.recovery_oblique:>10.4f} {r.M_duct:>10.4f} {r.recovery_total:>10.4f}  {warn_str}"
+            f"{r.recovery_oblique:>10.4f} {r.M_pre_terminal:>11.4f} {r.M_post_terminal:>11.4f} "
+            f"{r.recovery_total:>10.4f}  {warn_str}"
         )
 
     if args.json:
@@ -236,7 +237,8 @@ def _handle_offdesign(args):
                 "dx_over_hc": r.dx_over_hc,
                 "mass_capture_ratio": r.mass_capture_ratio,
                 "recovery_oblique": r.recovery_oblique,
-                "M_duct": r.M_duct,
+                "M_pre_terminal": r.M_pre_terminal,
+                "M_post_terminal": r.M_post_terminal,
                 "recovery_total": r.recovery_total,
                 "warnings": r.warnings,
             }

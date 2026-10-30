@@ -31,6 +31,8 @@ class Inputs:
     units: str = "SI"                   # "SI" | "Imperial"
     preset: str = None                  # name of the applied preset, None once edited
     off_design_mach: float = None       # evaluate the frozen design at this Mach (M4 slider)
+    max_cowl_enabled: bool = False      # limit the Oswatitsch optimum's cowl angle
+    max_cowl_deg: float = 30.0
 
 
 # Fields that do not change any computed result.
@@ -58,6 +60,8 @@ class _DesignJob(QRunnable):
             result = api.design(
                 i.mach, i.n_ramps, capture_height=i.capture_height_m, gamma=i.gamma,
                 ramp_angles=list(i.custom_angles) if i.method == "custom" else None,
+                max_cowl_angle=(i.max_cowl_deg if i.max_cowl_enabled and i.method != "custom"
+                                else None),
             )
             error = None
         except ValueError as exc:
@@ -122,6 +126,16 @@ class AppState(QObject):
             return None
         return api.captured_mass_flow(self.freestream, self._inputs.capture_height_m,
                                       self.design.mass_capture)
+
+    def notices(self):
+        """(level, text) for every current model-limit message: "warn" or "error"."""
+        out = []
+        if self.freestream is not None:
+            out.extend(("warn", w) for w in self.freestream.warnings)
+        for result in (self.design, self.off_design):
+            if result is not None:
+                out.extend((n.level, n.text) for n in result.notices)
+        return out
 
     def warnings(self):
         out = []

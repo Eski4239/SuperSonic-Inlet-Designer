@@ -25,12 +25,17 @@ class KpiCard(QFrame):
         self.sub_label = QLabel()
         self.sub_label.setObjectName("kpiSub")
         self.sub_label.hide()
+        self.badge = QLabel()
+        self.badge.setObjectName("kpiBadge")
+        self.badge.setFont(theme.label_font())
+        self.badge.hide()
 
         value_row = QHBoxLayout()
         value_row.setSpacing(tokens.space(1) // 2)
         value_row.addWidget(self.value_label)
         value_row.addWidget(self.unit_label)
         value_row.addStretch(1)
+        value_row.addWidget(self.badge)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.space(2), tokens.space(1) + 4, tokens.space(2),
                                   tokens.space(1) + 4)
@@ -45,8 +50,14 @@ class KpiCard(QFrame):
         self.sub_label.setText(sub or "")
         self.sub_label.setVisible(bool(sub))
 
+    def set_badge(self, text=None):
+        """Small accent tag next to the value (e.g. CONSTRAINED); None hides it."""
+        self.badge.setText(theme.caps(text) if text else "")
+        self.badge.setVisible(bool(text))
+
     def clear(self):
         self.set_value(EMPTY)
+        self.set_badge(None)
 
     def text(self):
         return self.value_label.text()

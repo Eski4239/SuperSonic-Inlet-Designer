@@ -1,13 +1,14 @@
 """Design panel (spec 4.2): ramps, method, custom angles, capture height, read-only geometry."""
 import re
 
-from PySide6.QtWidgets import QFormLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QFormLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from inletdesign import units as _units
 
 from ..theme import tokens
-from ..widgets import NumberField, SegmentedControl, field_label, section_title
+from ..widgets import CollapsibleSection, NumberField, SegmentedControl, field_label, section_title
 from . import format as fmt
+from .ramp_table import RampTable
 from .readout import Readout
 
 MAX_RAMPS = 4
@@ -53,11 +54,29 @@ class DesignPanel(QWidget):
         self.capture = NumberField(i.capture_height_m, minimum=0.0, min_exclusive=True)
         self.capture.setToolTip("Capture height h_c: cowl-lip height above the ramp leading edge.")
 
+        # Advanced: optional limit on the cowl angle of the Oswatitsch optimum (off by default).
+        self.max_cowl_check = QCheckBox("Max cowl angle")
+        self.max_cowl_check.setToolTip(
+            "Limit the total turning (cowl angle) of the Oswatitsch optimum, e.g. to keep the "
+            "external cowl shock attached. Costs recovery when active.")
+        self.max_cowl = NumberField(i.max_cowl_deg, decimals=1, minimum=0.0, maximum=90.0,
+                                    min_exclusive=True, unit="deg")
+        cowl_row = QWidget()
+        h = QHBoxLayout(cowl_row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(tokens.space(1))
+        h.addWidget(self.max_cowl_check)
+        h.addWidget(self.max_cowl, 1)
+        self.advanced = CollapsibleSection("Advanced", cowl_row, collapsed=True)
+
+        self.ramp_table = RampTable()
+        self.ramp_table.setToolTip("Per ramp: incremental deflection θ, shock angle β (relative "
+                                   "to the local flow) and the Mach number behind the shock.")
         self.readout = Readout([
-            ("theta", "Ramp angles θ", None, "Incremental ramp deflections."),
-            ("beta", "Shock angles β", None, "Oblique shock angles relative to the local flow."),
             ("throat", "Throat height", "length", "Lip to terminal-shock foot distance."),
             ("cowl", "Cowl angle", None, "Cowl / duct direction from the freestream axis."),
+            ("margin", "Cowl margin", None,
+             "θ_max(M∞) − cowl angle: below 0 the external cowl shock detaches."),
         ])
 
         form = QFormLayout()
@@ -76,11 +95,15 @@ class DesignPanel(QWidget):
         layout.addWidget(self.method)
         layout.addWidget(self.custom_box)
         layout.addWidget(self.custom_error)
+        layout.addWidget(self.advanced)
         layout.addWidget(field_label("Geometry"))
+        layout.addWidget(self.ramp_table)
         layout.addWidget(self.readout)
 
         self.ramps.changed.connect(lambda key: self._set_ramps(int(key)))
         self.method.changed.connect(self._set_method)
+        self.max_cowl_check.toggled.connect(lambda on: state.update(max_cowl_enabled=on))
+        self.max_cowl.value_changed.connect(lambda v: state.update(max_cowl_deg=v))
         self.capture.value_changed.connect(
             lambda v: state.update(capture_height_m=_units.from_display(v, "length",
                                                                           state.inputs.units)))
@@ -127,6 +150,11 @@ class DesignPanel(QWidget):
             label.setVisible(visible)
             if visible and k < len(i.custom_angles):
                 field.set_value(i.custom_angles[k])
+        self.max_cowl_check.blockSignals(True)
+        self.max_cowl_check.setChecked(i.max_cowl_enabled)
+        self.max_cowl_check.blockSignals(False)
+        self.max_cowl.set_value(i.max_cowl_deg)
+        self.max_cowl.setEnabled(i.max_cowl_enabled and i.method != "custom")
         self.capture.set_decimals(_DECIMALS_LENGTH[system])
         self.capture.set_unit(_units.unit_label("length", system))
         self.capture.set_value(_units.to_display(i.capture_height_m, "length", system))
@@ -136,14 +164,18 @@ class DesignPanel(QWidget):
         system = self.state.inputs.units
         self._show_error(error)
         if result is None:
-            for key in ("theta", "beta", "cowl"):
+            self.ramp_table.clear()
+            for key in ("cowl", "margin"):
                 self.readout.set_text(key, "—")
             self.readout.set_si("throat", None, system)
             return
-        self.readout.set_text("theta", fmt.angles(result.ramp_angles_deg), "deg")
-        self.readout.set_text("beta", fmt.angles(result.betas_deg), "deg")
+        self.ramp_table.set_rows([
+            (theta, beta, result.regions[k + 1].M)
+            for k, (theta, beta) in enumerate(zip(result.ramp_angles_deg, result.betas_deg))
+        ])
         self.readout.set_si("throat", result.throat_height, system)
         self.readout.set_text("cowl", f"{result.cowl_angle_deg:.2f}", "deg")
+        self.readout.set_text("margin", f"{result.cowl_margin_deg:+.2f}", "deg")
 
     def _show_error(self, error):
         """Route a core error to the ramp field it names, else show it under the method."""
@@ -156,10 +188,10 @@ class DesignPanel(QWidget):
                 target = self.angle_fields[int(match.group(1)) - 1]
         if target is not None:
             detail = error.split(":", 1)[1].strip()
-            target.set_external_error(detail[:1].upper() + detail[1:])
+            target.set_external_error(fmt.nbsp(detail[:1].upper() + detail[1:]))
             self.custom_error.hide()
         else:
-            self.custom_error.setText(error or "")
+            self.custom_error.setText(fmt.nbsp(error or ""))
             self.custom_error.setVisible(bool(error))
 
 

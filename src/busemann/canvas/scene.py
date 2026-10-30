@@ -12,11 +12,14 @@ from inletdesign import units as _units
 
 from .. import theme
 from ..theme import tokens
-from ..views import format as fmt
+from . import picture as P
 
 LAYERS = ("regions", "walls", "shocks", "streamtube", "dimensions", "annotations", "selection")
 TOGGLEABLE = ("shocks", "regions", "dimensions", "grid")
 _Z = {name: i for i, name in enumerate(LAYERS)}
+BOW_SHOCK_TOOLTIP = ("Illustrative only: the external cowl shock is detached, so a bow shock "
+                     "stands ahead of the lip. Its position and the spillage/drag it causes "
+                     "are not modelled.")
 
 
 def S(p):
@@ -38,29 +41,39 @@ def color(name, alpha=None):
 
 def pen(name, width=1.0, style=Qt.PenStyle.SolidLine, alpha=None):
     p = QPen(color(name, alpha), width, style)
-    p.setCosmetic(True)               # width in screen px at any zoom
+    p.setCosmetic(True)               # width in screen px at any zoom / display scale
     p.setCapStyle(Qt.PenCapStyle.RoundCap)
     p.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     return p
 
 
-def mach_color(M_value, M_max):
-    """Linear interpolation along tokens.MACH_RAMP for M in [0, M_max]."""
-    stops = [QColor(c) for c in tokens.MACH_RAMP]
-    x = min(max(M_value / M_max, 0.0), 1.0) * (len(stops) - 1) if M_max > 0 else 0.0
-    i = min(int(x), len(stops) - 2)
-    f = x - i
-    a, b = stops[i], stops[i + 1]
-    c = QColor.fromRgbF(a.redF() + (b.redF() - a.redF()) * f,
-                        a.greenF() + (b.greenF() - a.greenF()) * f,
-                        a.blueF() + (b.blueF() - a.blueF()) * f)
-    c.setAlphaF(tokens.REGION_ALPHA)
-    return c
+def _mix(a, b, f):
+    a, b = QColor(a), QColor(b)
+    return QColor.fromRgbF(a.redF() + (b.redF() - a.redF()) * f,
+                           a.greenF() + (b.greenF() - a.greenF()) * f,
+                           a.blueF() + (b.blueF() - a.blueF()) * f)
 
 
-def mach_scale_max(M_inf):
-    """Legend range 0 .. ceil(M_inf)."""
-    return float(max(1, math.ceil(M_inf - 1e-9)))
+def bin_colors(edges):
+    """One colour per Mach bin: sand below M = 1 (lightest next to sonic), blues above."""
+    sub = [i for i in range(len(edges) - 1) if edges[i + 1] <= 1.0 + 1e-12]
+    sup = [i for i in range(len(edges) - 1) if i not in sub]
+    out = [None] * (len(edges) - 1)
+    for rank, i in enumerate(reversed(sub)):            # rank 0 = just below M = 1
+        out[i] = QColor(tokens.MACH_SUBSONIC[min(rank, len(tokens.MACH_SUBSONIC) - 1)])
+    stops = tokens.MACH_SUPERSONIC
+    for rank, i in enumerate(sup):
+        x = (rank / (len(sup) - 1) if len(sup) > 1 else 0.0) * (len(stops) - 1)
+        k = min(int(x), len(stops) - 2)
+        out[i] = _mix(stops[k], stops[k + 1], x - k)
+    return out
+
+
+def length_text(metres, system):
+    """Drawing lengths: mm with 1 decimal (SI), inches with 2 decimals (Imperial)."""
+    if system == "Imperial":
+        return f"{metres / _units.INCH:.2f} in"
+    return f"{metres * 1000.0:.1f} mm"
 
 
 def _poly(points):
@@ -86,26 +99,44 @@ class _Layer(QGraphicsRectItem):
 
 
 class Label(QGraphicsSimpleTextItem):
-    """Mono label of constant screen size anchored at a scene point (centre by default)."""
+    """Mono label of constant screen size, centred on its position, on a surface pill."""
 
-    def __init__(self, text="", parent=None, size=tokens.SIZE_LABEL, color_name="text_muted",
-                 anchor="center"):
+    PAD_X, PAD_Y, RADIUS = 4.0, 2.0, 4.0
+
+    def __init__(self, text="", parent=None, size=tokens.SIZE_LABEL, color_name="text_muted"):
         super().__init__(text, parent)
         self.setFont(theme.mono_font(size))
         self.setBrush(color(color_name))
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
-        self.anchor = anchor
-        self._reanchor()
+        self.preferred = (0.0, 0.0)     # model mm
+        self.anchor = "center"
+        self.attach = None              # model point the label describes (leader target)
+        self.leader = None              # QGraphicsPathItem shown when the label is displaced
+        self._recentre()
 
-    def set(self, text, model_pt):
+    def boundingRect(self):
+        r = super().boundingRect()
+        return r.adjusted(-self.PAD_X, -self.PAD_Y, self.PAD_X, self.PAD_Y)
+
+    def paint(self, painter, option, widget=None):
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color("surface", 0.85))
+        painter.drawRoundedRect(self.boundingRect(), self.RADIUS, self.RADIUS)
+        super().paint(painter, option, widget)
+
+    def set(self, text, model_pt, anchor="center"):
         self.setText(text)
+        self.preferred, self.anchor = model_pt, anchor
         self.setPos(S(model_pt))
-        self._reanchor()
+        self._recentre()
 
-    def _reanchor(self):
+    def size_px(self):
         r = self.boundingRect()
-        dx = {"center": -r.width() / 2, "left": 0.0, "right": -r.width()}[self.anchor]
-        self.setTransform(QTransform.fromTranslate(dx, -r.height() / 2))
+        return r.width(), r.height()
+
+    def _recentre(self):
+        r = super().boundingRect()
+        self.setTransform(QTransform.fromTranslate(-r.width() / 2, -r.height() / 2))
 
 
 class InletScene(QGraphicsScene):
@@ -120,6 +151,11 @@ class InletScene(QGraphicsScene):
         self.region_items = []
         self.shock_items = []
         self._dim_items = []
+        self.dim_labels = []          # Label items of the dimension layer, placement order
+        self.mach_edges = [0.5, 1.0]
+        self.mach_colors = []
+        self.label_rects = []         # placed label rects (model mm), after layout_labels
+        self._callouts = []           # (leader item, anchor point, Label)
         self._build_static()
 
     # --- static items ------------------------------------------------------------------
@@ -134,6 +170,11 @@ class InletScene(QGraphicsScene):
         self.cowl_body = QGraphicsPolygonItem(walls)
         self.cowl_body.setBrush(hatch)
         self.cowl_body.setPen(pen("wall", 1.5))
+
+        self.bow_shock = QGraphicsPathItem(self.layers["shocks"])
+        self.bow_shock.setPen(pen("shock", 2.0, Qt.PenStyle.DashLine))
+        self.bow_shock.setToolTip(BOW_SHOCK_TOOLTIP)
+        self.bow_shock.hide()
 
         self.streamtube = QGraphicsPathItem(self.layers["streamtube"])
         self.streamtube.setPen(pen("text_muted", 1.0, Qt.PenStyle.DotLine))
@@ -155,29 +196,37 @@ class InletScene(QGraphicsScene):
         self.picture = pic
         if units is not None:
             self.units = units
-        sk = pic.skeleton
         self.ramp_body.setPolygon(_poly(pic.ramp_body))
         self.ramp_surface.setPath(_path(pic.ramp_surface))
         self.cowl_body.setPolygon(_poly(pic.cowl_body))
         self.streamtube.setPath(_path(pic.streamtube))
+        self.bow_shock.setPath(_path(pic.bow_shock))
+        self.bow_shock.setVisible(bool(pic.bow_shock))
         self._set_regions(pic)
         self._set_shocks(pic)
         self._set_arrow(pic)
         self._set_dimensions(pic)
-        self.mach_max = mach_scale_max(sk.regions[0].M)
 
     def _set_regions(self, pic):
         layer = self.layers["regions"]
         while len(self.region_items) < len(pic.regions):
-            item = QGraphicsPolygonItem(layer)
-            item.setPen(Qt.PenStyle.NoPen)
-            self.region_items.append(item)
+            self.region_items.append(QGraphicsPolygonItem(layer))
         while len(self.region_items) > len(pic.regions):
             self.removeItem(self.region_items.pop())
-        m_max = mach_scale_max(pic.skeleton.regions[0].M)
+        machs = [r.state.M for r in pic.regions]
+        self.mach_edges = P.mach_bins(min(machs), pic.skeleton.regions[0].M)
+        self.mach_colors = bin_colors(self.mach_edges)
         for item, region in zip(self.region_items, pic.regions):
+            fill = QColor(self.mach_colors[P.bin_index(region.state.M, self.mach_edges)])
             item.setPolygon(_poly(region.polygon))
-            item.setBrush(QBrush(mach_color(region.state.M, m_max)))
+            item.setBrush(QBrush(fill))
+            border = QPen(fill.darker(tokens.REGION_BORDER_DARKER), 1.0)
+            border.setCosmetic(True)
+            border.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            item.setPen(border)
+
+    def region_fill(self, index):
+        return self.region_items[index].brush().color()
 
     def _set_shocks(self, pic):
         layer = self.layers["shocks"]
@@ -200,19 +249,15 @@ class InletScene(QGraphicsScene):
         path.addPolygon(tip)
         path.closeSubpath()
         self.arrow.setPath(path)
-        label = "M∞ = " + f"{pic.skeleton.mach:.2f}"
-        self.arrow_label.set(label, (0.5 * (tail[0] + head[0]), tail[1] + 0.09 * h))
+        self.arrow_label.set(f"M∞ = {pic.skeleton.mach:.2f}",
+                             (0.5 * (tail[0] + head[0]), tail[1] + 0.1 * h))
 
     # --- dimensions --------------------------------------------------------------------
-    def _length_text(self, label, metres):
-        value = _units.to_display(metres, "length", self.units)
-        return f"{label} {fmt.sig(value, 4)} {_units.unit_label('length', self.units)}"
-
     def _set_dimensions(self, pic):
         layer = self.layers["dimensions"]
         for item in self._dim_items:
             self.removeItem(item)
-        self._dim_items = []
+        self._dim_items, self.dim_labels, self._callouts = [], [], []
         h = pic.skeleton.h
         line_pen = pen("text_muted", 1.0)
         ext_pen = pen("text_muted", 0.8, alpha=0.7)
@@ -221,6 +266,17 @@ class InletScene(QGraphicsScene):
         def add(item):
             item.setParentItem(layer)
             self._dim_items.append(item)
+            return item
+
+        def label(text, d, attach=None):
+            item = add(Label())
+            item.set(text, d.text_at, d.anchor)
+            item.attach = attach
+            if attach is not None:
+                item.leader = add(QGraphicsPathItem())
+                item.leader.setPen(pen("text_muted", 0.8, alpha=0.8))
+                item.leader.hide()
+            self.dim_labels.append(item)
             return item
 
         for d in pic.dimensions:
@@ -237,50 +293,97 @@ class InletScene(QGraphicsScene):
                     ext.lineTo(S((q[0] + vx / vl * tick, q[1] + vy / vl * tick)))
                 add(QGraphicsPathItem(ext)).setPen(ext_pen)
                 dim = _path([d0, d1])
-                for p, s in ((d0, 1.0), (d1, -1.0)):       # filled arrowheads, pointing outward
+                for p, sgn in ((d0, 1.0), (d1, -1.0)):       # filled arrowheads, inward
                     nx, ny = -uy, ux
                     dim.addPolygon(QPolygonF([
                         S(p),
-                        S((p[0] + s * ux * 2.2 * tick + nx * 0.6 * tick,
-                           p[1] + s * uy * 2.2 * tick + ny * 0.6 * tick)),
-                        S((p[0] + s * ux * 2.2 * tick - nx * 0.6 * tick,
-                           p[1] + s * uy * 2.2 * tick - ny * 0.6 * tick)),
+                        S((p[0] + sgn * ux * 2.2 * tick + nx * 0.6 * tick,
+                           p[1] + sgn * uy * 2.2 * tick + ny * 0.6 * tick)),
+                        S((p[0] + sgn * ux * 2.2 * tick - nx * 0.6 * tick,
+                           p[1] + sgn * uy * 2.2 * tick - ny * 0.6 * tick)),
                     ]))
                     dim.closeSubpath()
                 item = add(QGraphicsPathItem(dim))
                 item.setPen(line_pen)
                 item.setBrush(QBrush(color("text_muted")))
-                anchor = "right" if d.label == "h_c" else "center"
-                add(Label(anchor=anchor)).set(self._length_text(d.label, d.value), d.text_at)
+                label(f"{d.label} {length_text(d.value, self.units)}", d,
+                      attach=((d0[0] + d1[0]) / 2, (d0[1] + d1[1]) / 2))
             elif d.kind == "angle":
                 c = d.points[0]
                 a0, a1 = d.angles
-                path = QPainterPath()
-                path.moveTo(S(c))
-                path.lineTo(S((c[0] + math.cos(math.radians(a0)) * d.radius * 1.35,
-                               c[1] + math.sin(math.radians(a0)) * d.radius * 1.35)))
-                add(QGraphicsPathItem(path)).setPen(pen("text_muted", 0.8, Qt.PenStyle.DashLine))
+                ref = QPainterPath()
+                ref.moveTo(S(c))
+                ref.lineTo(S((c[0] + math.cos(math.radians(a0)) * d.radius * 1.35,
+                              c[1] + math.sin(math.radians(a0)) * d.radius * 1.35)))
+                add(QGraphicsPathItem(ref)).setPen(pen("text_muted", 0.8, Qt.PenStyle.DashLine))
                 arc = QPainterPath()
                 rect = QRectF(c[0] - d.radius, -c[1] - d.radius, 2 * d.radius, 2 * d.radius)
                 arc.arcMoveTo(rect, a0)
                 arc.arcTo(rect, a0, a1 - a0)
                 add(QGraphicsPathItem(arc)).setPen(line_pen)
-                add(Label(anchor="left")).set(f"{d.label} {d.value:.2f}°", d.text_at)
+                mid = math.radians(0.5 * (a0 + a1))
+                label(f"{d.label} {d.value:.2f}°", d,
+                      attach=(c[0] + math.cos(mid) * d.radius, c[1] + math.sin(mid) * d.radius))
             else:  # callout
                 p = d.points[0]
-                lead = _path([p, d.text_at])
-                lead.addEllipse(S(p), 0.012 * h, 0.012 * h)
-                add(QGraphicsPathItem(lead)).setPen(line_pen)
-                x, y = (_units.to_display(v, "length", self.units) for v in d.extra)
-                unit = _units.unit_label("length", self.units)
-                add(Label(anchor="right")).set(f"{d.label} ({fmt.sig(x, 4)}, {fmt.sig(y, 4)}) {unit}",
-                                               d.text_at)
+                lead = add(QGraphicsPathItem())
+                lead.setPen(line_pen)
+                x, y = (length_text(v, self.units) for v in d.extra)
+                item = label(f"{d.label} ({x.split()[0]}, {y})", d)
+                self._callouts.append((lead, p, item))
+        self._update_callouts()
+
+    def _update_callouts(self):
+        for lead, p, item in self._callouts:
+            path = _path([p, P_model(item.pos())])
+            path.addEllipse(S(p), 0.012 * self.picture.skeleton.h, 0.012 * self.picture.skeleton.h)
+            lead.setPath(path)
+
+    # --- label layout (collision pass) ---------------------------------------------------
+    def obstacles(self):
+        pic = self.picture
+        polygons = [pic.ramp_body, pic.cowl_body]
+        segments = []
+        if self.layers["shocks"].isVisible():
+            segments += [(s.start, s.end) for s in pic.shocks]
+            segments += list(zip(pic.bow_shock, pic.bow_shock[1:]))
+        return polygons, segments
+
+    def layout_labels(self, scale):
+        """Place the M∞ label and (if shown) dimension labels at `scale` px/mm, avoiding
+        hatching, shocks and each other. Stores the placed rects (model mm)."""
+        if self.picture is None:
+            return
+        labels = [self.arrow_label]
+        if self.layers["dimensions"].isVisible():
+            labels += self.dim_labels
+        polygons, segments = self.obstacles()
+        specs = [(lab.preferred, *lab.size_px(), lab.anchor) for lab in labels]
+        placed = P.place_labels(specs, polygons, segments, scale)
+        self.label_rects = []
+        for lab, (centre, rect) in zip(labels, placed):
+            lab.setPos(S(centre))
+            self.label_rects.append(rect)
+            if lab.leader is not None:
+                self._set_leader(lab, centre, rect)
+        self._update_callouts()
+
+    @staticmethod
+    def _set_leader(lab, centre, rect):
+        """Leader from the described point to the nearest edge of a label that had to move."""
+        ax, ay = lab.attach
+        inside = rect[0] <= ax <= rect[2] and rect[1] <= ay <= rect[3]
+        near = (min(max(ax, rect[0]), rect[2]), min(max(ay, rect[1]), rect[3]))
+        far = math.hypot(near[0] - ax, near[1] - ay) > 0.6 * (rect[3] - rect[1])
+        if inside or not far:
+            lab.leader.hide()
+            return
+        lab.leader.setPath(_path([lab.attach, near]))
+        lab.leader.show()
 
     # --- visibility / state ------------------------------------------------------------
     def set_layer_visible(self, name, visible):
-        if name == "shocks":
-            self.layers["shocks"].setVisible(visible)
-        elif name in self.layers:
+        if name in self.layers:
             self.layers[name].setVisible(visible)
 
     def layer_visible(self, name):
@@ -307,13 +410,17 @@ class InletScene(QGraphicsScene):
         self.selection_item.setPath(path)
         self.selection_item.show()
 
-    def geometry_rect(self):
-        """Scene rect of the drawing (walls, domain and label anchors), without text extents."""
+    def geometry_rect(self, include_labels=False):
+        """Scene rect of the drawing (walls, flow domain, bow shock) plus, optionally, the
+        placed label rects from the last layout_labels()."""
         if self.picture is None:
             return QRectF(-50, -50, 100, 100)
         x0, y0, x1, y1 = self.picture.bounds()
-        pts = [d.text_at for d in self.picture.dimensions if d.text_at] if \
-            self.layers["dimensions"].isVisible() else []
-        for p in pts:
-            x0, y0, x1, y1 = min(x0, p[0]), min(y0, p[1]), max(x1, p[0]), max(y1, p[1])
+        if include_labels:
+            for r in self.label_rects:
+                x0, y0, x1, y1 = min(x0, r[0]), min(y0, r[1]), max(x1, r[2]), max(y1, r[3])
         return QRectF(QPointF(x0, -y1), QPointF(x1, -y0))
+
+
+def P_model(qp):
+    return (qp.x(), -qp.y())

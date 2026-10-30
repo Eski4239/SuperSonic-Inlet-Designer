@@ -1,0 +1,85 @@
+"""Subprocess probe for test_scaling.py: build the main window at QT_SCALE_FACTOR (set by the
+caller) at its minimum size and report clipped widgets as JSON on stdout.
+
+Usage: python scaling_probe.py [screenshot.png]
+"""
+import json
+import os
+import sys
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
+from PySide6.QtWidgets import QAbstractScrollArea, QApplication, QSizePolicy, QWidget  # noqa: E402
+
+from busemann.app import MainWindow, setup_application, setup_high_dpi  # noqa: E402
+
+
+def settle(ms=600):
+    loop = QEventLoop()
+    QTimer.singleShot(ms, loop.quit)
+    loop.exec()
+
+
+def clipped_widgets(window):
+    """Visible widgets smaller than their minimum size hint (layout could not honour it)."""
+    problems = []
+    ignored = QSizePolicy.Policy.Ignored
+    for w in window.findChildren(QWidget):
+        if not w.isVisible() or w.window() is not window:
+            continue
+        if w.parent() is not None and isinstance(w.parent(), QAbstractScrollArea):
+            continue                      # scroll-area internals (viewport, bars)
+        hint = w.minimumSizeHint()
+        policy = w.sizePolicy()
+        short_w = policy.horizontalPolicy() != ignored and hint.width() > 0 and \
+            w.width() < min(hint.width(), w.maximumWidth()) - 1
+        short_h = policy.verticalPolicy() != ignored and hint.height() > 0 and \
+            w.height() < min(hint.height(), w.maximumHeight()) - 1
+        parent = w.parentWidget()
+        scroll_content = parent is not None and isinstance(parent.parentWidget(),
+                                                           QAbstractScrollArea)
+        overflow = parent is not None and not scroll_content and not             parent.rect().adjusted(-1, -1, 1, 1).contains(w.geometry())
+        if short_w or short_h or overflow:
+            problems.append({"widget": type(w).__name__, "name": w.objectName(),
+                             "size": [w.width(), w.height()],
+                             "min_hint": [hint.width(), hint.height()],
+                             "overflows_parent": bool(overflow)})
+    return problems
+
+
+def panel_overflow(window):
+    """Side-panel content wider than its scroll viewport (would be cut off on the right)."""
+    problems = []
+    for panel in (window.left_panel, window.right_panel):
+        body = panel.widget()
+        if body.minimumSizeHint().width() > panel.viewport().width() + 1:
+            problems.append({"widget": "panel body", "name": panel.objectName(),
+                             "size": [panel.viewport().width(), 0],
+                             "min_hint": [body.minimumSizeHint().width(), 0]})
+    return problems
+
+
+def main():
+    setup_high_dpi()
+    app = QApplication([])
+    setup_application(app)
+    window = MainWindow()
+    window.resize(window.minimumSize())
+    window.show()
+    settle()
+    for n_ramps in (2, 4):                # 4 ramps: the longest panel content
+        window.state.update(n_ramps=n_ramps)
+        settle()
+    window.state.update(n_ramps=2)
+    settle()
+    result = {"dpr": window.devicePixelRatioF(), "size": [window.width(), window.height()],
+              "problems": clipped_widgets(window) + panel_overflow(window)}
+    if len(sys.argv) > 1:
+        window.grab().save(sys.argv[1])
+    window.state.shutdown()
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()

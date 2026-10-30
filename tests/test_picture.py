@@ -106,3 +106,59 @@ def test_geometry_helpers():
     assert P.polygon_area(half) == pytest.approx(2.0)
     assert P.ray_exit((1, 1), (1, 0), square) == pytest.approx(1.0)
     assert math.isinf(P.ray_exit((5, 5), (1, 0), square))
+
+
+# --- M3.1: Mach bins, bow shock, flow-side angle arcs, label placement -----------------
+
+@pytest.mark.parametrize("min_M, M_inf", [(0.699, 3.0), (0.628, 6.7), (0.8, 1.5), (0.9, 1.2),
+                                          (0.3, 2.0), (0.62, 4.5)])
+def test_mach_bins_diverge_at_sonic(min_M, M_inf):
+    edges = P.mach_bins(min_M, M_inf)
+    assert edges[0] == min(0.5, min_M) and edges[-1] == M_inf
+    assert 1.0 in edges
+    assert all(b > a for a, b in zip(edges, edges[1:]))
+    assert 4 <= len(edges) - 1 <= P.MAX_BINS
+    assert P.bin_index(min_M, edges) < edges.index(1.0) <= P.bin_index(M_inf - 1e-9, edges) + 1
+
+
+def test_bow_shock_only_when_cowl_detached():
+    _, attached = _pic(3.0, 2)
+    assert not attached.skeleton.cowl_detached and attached.bow_shock == []
+    _, detached = _pic(6.7, 4)
+    assert detached.skeleton.cowl_detached and len(detached.bow_shock) > 2
+    lip = detached.skeleton.lip
+    assert min(p[0] for p in detached.bow_shock) < lip[0]      # stands ahead of the lip
+    x0, y0, x1, y1 = detached.bounds()
+    assert all(x0 <= p[0] <= x1 and y0 <= p[1] <= y1 for p in detached.bow_shock)
+
+
+@pytest.mark.parametrize("n", [1, 2, 4])
+def test_angle_arcs_lie_on_the_flow_side(n):
+    _, pic = _pic(3.0, n)
+    for d in (d for d in pic.dimensions if d.kind == "angle"):
+        q = d.points[0]
+        mid = math.radians(0.5 * (d.angles[0] + d.angles[1]))
+        probe = (q[0] + math.cos(mid) * 0.5 * d.radius, q[1] + math.sin(mid) * 0.5 * d.radius)
+        assert any(P.point_in_polygon(probe, r.polygon) for r in pic.regions)
+        assert d.angles[1] - d.angles[0] == pytest.approx(d.value)
+
+
+def test_place_labels_avoids_obstacles_and_each_other():
+    wall = [(0, 0), (100, 0), (100, -5), (0, -5)]
+    shock = ((0, 0), (100, 50))
+    labels = [((50, 1), 40, 14, "center"), ((50, 1), 40, 14, "center")]   # same spot twice
+    placed = P.place_labels(labels, polygons=[wall], segments=[shock], scale=1.0)
+    (c1, r1), (c2, r2) = placed
+    for r in (r1, r2):
+        assert not P.rect_hits_polygon(r, wall)
+        assert not P.rect_hits_segment(r, *shock)
+    assert not P._rect_overlaps_rect(r1, r2)
+
+
+def test_rect_collision_helpers():
+    rect = (0, 0, 10, 10)
+    assert P.rect_hits_segment(rect, (-5, 5), (15, 5))
+    assert not P.rect_hits_segment(rect, (-5, 20), (15, 20))
+    assert P.rect_hits_polygon(rect, [(5, 5), (20, 5), (20, 20)])
+    assert P.rect_hits_polygon(rect, [(-10, -10), (20, -10), (20, 20), (-10, 20)])  # inside
+    assert not P.rect_hits_polygon(rect, [(20, 20), (30, 20), (30, 30)])

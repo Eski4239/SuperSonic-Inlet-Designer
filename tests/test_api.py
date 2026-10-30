@@ -83,7 +83,8 @@ def test_design_matches_core(M, n):
     assert r.regions[0].p0_ratio == 1.0
     assert r.regions[-1].p0_ratio == pytest.approx(r.recovery_total)
     assert r.inputs.method == "oswatitsch"
-    assert not r.warnings
+    # Only cowl-attachment notices are expected here (M3.1 check).
+    assert all(w.startswith(("Cowl near", "External cowl")) for w in r.warnings)
     _json_ok(r)
 
 

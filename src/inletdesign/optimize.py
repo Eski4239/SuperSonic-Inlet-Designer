@@ -8,7 +8,7 @@ Two independent methods are provided so they can cross-check each other:
   ramp angles directly, used only as a correctness check on the method above.
 """
 import numpy as np
-from scipy.optimize import minimize, minimize_scalar
+from scipy.optimize import brentq, minimize, minimize_scalar
 
 from . import inlet
 from . import oblique_shock as obl
@@ -52,19 +52,43 @@ def equal_strength_ramps(M_inf, n_ramps, Mn, gamma=1.4):
     return angles
 
 
-def optimize_equal_strength(M_inf, n_ramps, gamma=1.4):
+def optimize_equal_strength(M_inf, n_ramps, gamma=1.4, max_turn_deg=None):
     """Maximize total pressure recovery over Mn under the equal-strength condition.
 
     Coarse grid scan over (1, M_inf), skipping infeasible Mn, then refines
     with a bounded 1-D minimization around the best grid point.
 
+    max_turn_deg optionally limits the total turning (= cowl angle, sum of ramp
+    angles). The total turning rises monotonically with Mn and recovery rises
+    with Mn up to the optimum, so an active limit puts the constrained optimum
+    where sum(theta) = max_turn_deg (solved with brentq on Mn).
+
     Returns:
         dict with keys: ramps (list[float]), Mn (float or None), recovery
-        (float), states (list[FlowState]).
+        (float), states (list[FlowState]), constrained (bool).
     """
     if n_ramps == 0:
         states = inlet.compress(M_inf, [], gamma)
-        return {"ramps": [], "Mn": None, "recovery": states[-1].p0_ratio, "states": states}
+        return {"ramps": [], "Mn": None, "recovery": states[-1].p0_ratio, "states": states,
+                "constrained": False}
+    result = _optimize_unconstrained(M_inf, n_ramps, gamma)
+    result["constrained"] = False
+    if max_turn_deg is None or sum(result["ramps"]) <= max_turn_deg:
+        return result
+    if not max_turn_deg > 0:
+        raise ValueError(f"max cowl angle must be > 0 deg (got {max_turn_deg:g})")
+
+    def excess(Mn):
+        return sum(equal_strength_ramps(M_inf, n_ramps, Mn, gamma)) - max_turn_deg
+
+    Mn = brentq(excess, 1.0 + 1e-9, result["Mn"], xtol=1e-12)
+    ramps = equal_strength_ramps(M_inf, n_ramps, Mn, gamma)
+    states = inlet.compress(M_inf, ramps, gamma)
+    return {"ramps": ramps, "Mn": float(Mn), "recovery": states[-1].p0_ratio,
+            "states": states, "constrained": True}
+
+
+def _optimize_unconstrained(M_inf, n_ramps, gamma):
 
     def recovery_for_Mn(Mn):
         try:

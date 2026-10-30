@@ -26,6 +26,7 @@ class InletGeometry:
     betas_deg: list
     M_inf: float
     scale: float
+    constrained: bool = False
 
 
 def _line_intersect(p1, dir1_deg, p2, dir2_deg):
@@ -115,9 +116,37 @@ def build_geometry(M_inf, ramp_angles_deg, capture_height=1.0, scale=1.0, gamma=
     )
 
 
-def design_inlet(M_inf, n_ramps, capture_height=1.0, scale=1.0, gamma=1.4):
-    """Runs optimize_equal_strength then build_geometry on its ramp angles."""
+def design_inlet(M_inf, n_ramps, capture_height=1.0, scale=1.0, gamma=1.4, max_cowl_deg=None):
+    """Runs optimize_equal_strength (optionally cowl-angle limited) then build_geometry.
+
+    The returned geometry carries `constrained` (True when the cowl limit was active).
+    """
     from . import optimize as opt
 
-    result = opt.optimize_equal_strength(M_inf, n_ramps, gamma)
-    return build_geometry(M_inf, result["ramps"], capture_height, scale, gamma)
+    result = opt.optimize_equal_strength(M_inf, n_ramps, gamma, max_turn_deg=max_cowl_deg)
+    geom = build_geometry(M_inf, result["ramps"], capture_height, scale, gamma)
+    geom.constrained = result["constrained"]
+    return geom
+
+
+COWL_MARGIN_WARN_DEG = 2.0
+
+
+def cowl_check(M_inf, cowl_angle_deg, gamma=1.4):
+    """External cowl attachment: margin = theta_max(M_inf) - cowl angle (deg).
+
+    The cowl's outer surface turns the freestream by the cowl angle; past theta_max the
+    external cowl shock detaches. Returns (theta_max, margin, level, message), level is
+    "error" (margin < 0), "warn" (0 <= margin < COWL_MARGIN_WARN_DEG) or None.
+    """
+    theta_max, _ = obl.max_deflection(M_inf, gamma)
+    margin = theta_max - cowl_angle_deg
+    if margin < 0.0:
+        return theta_max, margin, "error", (
+            f"External cowl shock detached (cowl turns {cowl_angle_deg:.2f} deg, "
+            f"theta_max = {theta_max:.2f} deg at M_inf = {M_inf:.2f}): bow shock, "
+            "spillage and cowl drag not modelled"
+        )
+    if margin < COWL_MARGIN_WARN_DEG:
+        return theta_max, margin, "warn", f"Cowl near shock detachment (margin {margin:.2f} deg)"
+    return theta_max, margin, None, None

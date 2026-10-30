@@ -18,11 +18,12 @@ from ..views import format as fmt
 from ..views.rows import region_rows, shock_rows
 from . import picture as P
 from .hover_card import HoverCard
-from .scene import M, S, InletScene, color, mach_color
+from .scene import M, S, InletScene, color
 
 _ZOOM_STEP = 1.15
 _SCALE_LIMITS = (0.02, 400.0)     # screen px per mm
-_LEGEND_W = 72                    # px reserved at the right edge for the Mach legend
+_LEGEND_W = 84                    # legend card width, px
+_LEGEND_ROW_H = 20                # px per Mach bin in the legend
 
 
 def nice_step(x):
@@ -136,6 +137,7 @@ class InletCanvas(QGraphicsView):
         r = self.inlet_scene.geometry_rect()
         pad = 20.0 * max(sk.h, 1.0)
         self.setSceneRect(r.adjusted(-pad, -pad, pad, pad))
+        self.inlet_scene.layout_labels(self.scale_factor())
         self._refresh_selection()
         self.viewport().update()
 
@@ -146,7 +148,7 @@ class InletCanvas(QGraphicsView):
         self.hover_card.hide()
         if self.inlet_scene.picture is not None:
             self.inlet_scene.set_dimmed(True)
-        self._set_overlay(message[:1].upper() + message[1:], error=True)
+        self._set_overlay(fmt.nbsp(message[:1].upper() + message[1:]), error=True)
 
     def _clear_error(self):
         self.error_text = None
@@ -162,33 +164,65 @@ class InletCanvas(QGraphicsView):
         self._place_overlay()
 
     def _place_overlay(self):
+        """Error card: as wide as its text up to a max width, then the text wraps."""
         vp = self.viewport()
-        w = min(440, max(200, vp.width() - 64))
+        max_w = max(160, min(480, vp.width() - 64))
+        margins = self.overlay.contentsMargins()
+        pad = margins.left() + margins.right() + 2 * tokens.space(2) + 4
+        natural = self.overlay.fontMetrics().horizontalAdvance(self.overlay.text()) + pad
+        w = int(min(natural, max_w))
         self.overlay.setFixedWidth(w)
-        self.overlay.adjustSize()
+        self.overlay.setFixedHeight(self.overlay.heightForWidth(w))
         self.overlay.move((vp.width() - w) // 2, max(16, (vp.height() - self.overlay.height()) // 2))
 
     def is_dimmed(self):
         return self.inlet_scene.layers["walls"].opacity() < 1.0
 
     # --- view control --------------------------------------------------------------------
+    def available_rect(self):
+        """Viewport area for the drawing: everything left of the legend card."""
+        vp = self.viewport().rect()
+        if self.legend_visible():
+            vp.setRight(vp.right() - (_LEGEND_W + 2 * tokens.LEGEND_INSET_PX))
+        return QRectF(vp)
+
     def fit(self, pic=None):
-        """Fit the drawing (walls, flow domain, label anchors) with margins; resumes auto-fit."""
+        """Fill CANVAS_FILL of the limiting dimension of the available area, centred.
+
+        With Dimensions on, the placed label rects are part of the bounds; label size in
+        scene units depends on the zoom, so the fit is iterated.
+        """
         self._auto_fit = True
-        if pic is not None:
-            x0, y0, x1, y1 = pic.bounds()
-            rect = QRectF(QPointF(x0, -y1), QPointF(x1, -y0))
-        else:
-            rect = self.inlet_scene.geometry_rect()
-        vp = self.viewport()
-        m = tokens.CANVAS_FIT_MARGIN_PX
-        legend = _LEGEND_W if self.inlet_scene.layer_visible("regions") else 0
-        avail_w = max(40, vp.width() - 2 * m - legend)
-        avail_h = max(40, vp.height() - 2 * m)
-        s = min(avail_w / max(rect.width(), 1e-9), avail_h / max(rect.height(), 1e-9))
-        s = min(max(s, _SCALE_LIMITS[0]), _SCALE_LIMITS[1])
+        avail = self.available_rect()
+        with_labels = pic is None and self.inlet_scene.layer_visible("dimensions")
+        s = self.scale_factor()
+        for _ in range(3 if with_labels else 1):
+            if pic is not None:
+                x0, y0, x1, y1 = pic.bounds()
+                rect = QRectF(QPointF(x0, -y1), QPointF(x1, -y0))
+            else:
+                self.inlet_scene.layout_labels(s)
+                rect = self.inlet_scene.geometry_rect(include_labels=True)
+            s = tokens.CANVAS_FILL * min(avail.width() / max(rect.width(), 1e-9),
+                                         avail.height() / max(rect.height(), 1e-9))
+            s = min(max(s, _SCALE_LIMITS[0]), _SCALE_LIMITS[1])
         self.setTransform(QTransform.fromScale(s, s))
-        self.centerOn(rect.center() + QPointF(0.5 * legend / s, 0.0))
+        vp_centre = QPointF(self.viewport().rect().center())
+        offset = (QPointF(avail.center()) - vp_centre) / s        # scene units
+        self.centerOn(rect.center() - offset)
+        if pic is None:
+            self.inlet_scene.layout_labels(s)
+            self.viewport().update()
+
+    def legend_visible(self):
+        return self.inlet_scene.picture is not None and self.inlet_scene.layer_visible("regions")
+
+    def legend_rect(self):
+        rows = max(1, len(self.inlet_scene.mach_edges) - 1)
+        vp = self.viewport()
+        h = 36 + rows * _LEGEND_ROW_H + 12
+        return QRectF(vp.width() - tokens.LEGEND_INSET_PX - _LEGEND_W, tokens.LEGEND_INSET_PX,
+                      _LEGEND_W, h)
 
     def scale_factor(self):
         return self.transform().m11()
@@ -201,6 +235,7 @@ class InletCanvas(QGraphicsView):
         self.scale(factor, factor)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self._auto_fit = False
+        self.inlet_scene.layout_labels(self.scale_factor())
 
     def zoom_in(self):
         self.zoom(_ZOOM_STEP ** 2, about_cursor=False)
@@ -220,6 +255,8 @@ class InletCanvas(QGraphicsView):
                 self.select(None, None)
         if self._auto_fit and self._shown is not None:
             self.fit()
+        else:
+            self.inlet_scene.layout_labels(self.scale_factor())
         self.viewport().update()
 
     def layer_visible(self, name):
@@ -386,38 +423,50 @@ class InletCanvas(QGraphicsView):
         painter.save()
         painter.resetTransform()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        if self.inlet_scene.picture is not None and self.inlet_scene.layer_visible("regions"):
-            if not self.is_dimmed():
-                self._draw_legend(painter)
+        if self.legend_visible() and not self.is_dimmed():
+            self._draw_legend(painter)
         if self.grid_visible:
             self._draw_scale_bar(painter)
         painter.restore()
 
     def _draw_legend(self, painter):
-        vp = self.viewport()
-        m_max = self.inlet_scene.mach_max
-        bar_w, top = 12, 40
-        height = max(80, min(200, vp.height() - 120))
-        x = vp.width() - 24 - bar_w
-        slices = 50
-        for k in range(slices):
-            y0 = top + height * k / slices
-            c = mach_color(m_max * (1.0 - (k + 0.5) / slices), m_max)
-            c.setAlphaF(1.0)
-            painter.fillRect(QRectF(x, y0, bar_w, height / slices + 0.6), c)
+        """Discrete Mach legend on a translucent card, top-right; thin sonic line at M = 1."""
+        scene = self.inlet_scene
+        edges, colors = scene.mach_edges, scene.mach_colors
+        card = self.legend_rect()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(QPen(color("border"), 1))
-        painter.drawRect(QRectF(x, top, bar_w, height))
-        painter.setFont(theme.mono_font(tokens.SIZE_LABEL))
-        painter.setPen(color("text_muted"))
-        for value in (m_max, 0.5 * m_max, 0.0):
-            y = top + height * (1.0 - value / m_max)
-            painter.drawLine(QPointF(x - 4, y), QPointF(x, y))
-            painter.drawText(QRectF(x - 44, y - 8, 38, 16),
-                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                             f"{value:g}")
+        painter.setBrush(color("surface", tokens.LEGEND_ALPHA))
+        painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), tokens.RADIUS, tokens.RADIUS)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
         painter.setFont(theme.label_font())
-        painter.drawText(QRectF(x - 30, top - 24, bar_w + 34, 16),
-                         Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, "MACH")
+        painter.setPen(color("text_muted"))
+        painter.drawText(QRectF(card.left() + 10, card.top() + 8, card.width() - 20, 16),
+                         Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, "MACH")
+        x = card.left() + 12
+        bar_w = 14
+        top = card.top() + 36
+        rows = len(edges) - 1
+        bottom = top + rows * _LEGEND_ROW_H
+        for i in range(rows):                       # highest Mach at the top
+            y0 = bottom - (i + 1) * _LEGEND_ROW_H
+            painter.fillRect(QRectF(x, y0, bar_w, _LEGEND_ROW_H), colors[i])
+        painter.setPen(QPen(color("border"), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(QRectF(x, top, bar_w, rows * _LEGEND_ROW_H))
+        painter.setFont(theme.mono_font(tokens.SIZE_LABEL))
+        for i, edge in enumerate(edges):
+            y = bottom - i * _LEGEND_ROW_H
+            sonic = abs(edge - 1.0) < 1e-9
+            painter.setPen(QPen(color("text" if sonic else "text_muted"), 1.5 if sonic else 1))
+            if sonic:
+                painter.drawLine(QPointF(x - 3, y), QPointF(x + bar_w + 3, y))
+            else:
+                painter.drawLine(QPointF(x + bar_w, y), QPointF(x + bar_w + 3, y))
+            painter.setPen(color("text" if sonic else "text_muted"))
+            painter.drawText(QRectF(x + bar_w + 7, y - 8, card.right() - x - bar_w - 10, 16),
+                             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                             f"{edge:.3g}")
 
     def _draw_scale_bar(self, painter):
         vp = self.viewport()

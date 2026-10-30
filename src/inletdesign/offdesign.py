@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import inlet as _inlet
+from .geometry import cowl_check
 from . import oblique_shock as obl
 
 SUBSONIC_WARNING = "flow subsonic behind last ramp shock; no terminal normal shock"
@@ -27,6 +28,9 @@ class OffDesignResult:
     warnings: list
     betas_deg: list = None            # off-design ramp shock angles (relative to local flow)
     capture_streamline: list = None   # [(x, y), ...] upstream end first, ending at the lip
+    cowl_angle_deg: float = None
+    theta_max_freestream_deg: float = None
+    cowl_margin_deg: float = None     # theta_max(M_inf) - cowl angle; < 0: cowl shock detached
 
 
 def _side_of_line(point, origin, angle_deg):
@@ -160,6 +164,11 @@ def off_design(geom, M_inf, gamma=1.4):
     if regime == "shock-in-duct":
         warnings.append("internal reflected shock not modelled; recovery is an upper bound")
 
+    cowl_angle = float(sum(ramp_angles))
+    theta_max_inf, cowl_margin, _, cowl_message = cowl_check(M_inf, cowl_angle, gamma)
+    if cowl_message:
+        warnings.append(cowl_message)
+
     return OffDesignResult(
         M_inf=M_inf,
         regime=regime,
@@ -171,4 +180,7 @@ def off_design(geom, M_inf, gamma=1.4):
         warnings=warnings,
         betas_deg=[float(b) for b in betas],
         capture_streamline=streamline[::-1],
+        cowl_angle_deg=cowl_angle,
+        theta_max_freestream_deg=float(theta_max_inf),
+        cowl_margin_deg=float(cowl_margin),
     )

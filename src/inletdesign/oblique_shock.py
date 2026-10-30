@@ -80,6 +80,18 @@ def _beta_cubic_deg(M1, theta_deg, gamma, weak):
     tan_beta = (M2 - 1.0 + 2.0 * lam * np.cos((4.0 * np.pi * delta + np.arccos(chi)) / 3.0)) / (
         3.0 * a * t
     )
+    if weak:
+        # The trigonometric form cancels catastrophically as theta -> 0 (numerator and
+        # denominator both -> 0). Polish on the cubic itself,
+        # f(x) = a t x^3 - (M^2 - 1) x^2 + b t x + 1, which is well conditioned at the weak
+        # root; start from tan(mu) (the theta = 0 root) when the estimate is unusable.
+        x_mu = 1.0 / np.sqrt(M2 - 1.0)
+        x = np.where(np.isfinite(tan_beta) & (tan_beta > x_mu), tan_beta, x_mu)
+        for _ in range(8):
+            f = ((a * t * x - (M2 - 1.0)) * x + b * t) * x + 1.0
+            df = (3.0 * a * t * x - 2.0 * (M2 - 1.0)) * x + b * t
+            x = x - f / df
+        tan_beta = x
     return np.degrees(np.arctan(tan_beta))
 
 

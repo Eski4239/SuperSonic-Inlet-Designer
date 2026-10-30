@@ -93,8 +93,8 @@ def icon(name, color="text", size=20):
         svg = svg.replace("{{" + key + "}}", value)
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     result = QIcon()
-    for scale in (1, 2):
-        pixmap = QPixmap(QSize(size * scale, size * scale))
+    for scale in (1, 1.25, 1.5, 2):      # crisp at 100/125/150/200 % display scaling
+        pixmap = QPixmap(QSize(round(size * scale), round(size * scale)))
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         renderer.render(painter)

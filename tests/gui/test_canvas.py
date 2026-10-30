@@ -190,3 +190,103 @@ def test_section_labels_are_uppercase_with_tracking(window):
     assert font.letterSpacing() == pytest.approx(0.06 * 11, abs=1 / 64)   # Qt uses 1/64 px
     symbol = [w for w in window.findChildren(QLabel) if w.text() == "p∞"]
     assert symbol, "symbol labels keep their case"
+
+
+# --- M3.1 ----------------------------------------------------------------------------
+
+def test_region_colours_diverge_at_sonic(qtbot, window):
+    scene = window.canvas.inlet_scene
+    duct = scene.region_fill(len(scene.region_items) - 1)          # subsonic: warm sand
+    free = scene.region_fill(0)                                     # supersonic: blue
+    assert duct.red() > duct.blue() and free.blue() > free.red()
+    assert 1.0 in scene.mach_edges and scene.mach_edges[-1] == pytest.approx(3.0)
+    item = scene.region_items[0]
+    assert item.pen().color().lightness() < item.brush().color().lightness()   # darker border
+
+
+def test_legend_card_top_right(window):
+    canvas = window.canvas
+    card = canvas.legend_rect()
+    vp = canvas.viewport().rect()
+    assert card.top() == 16 and vp.width() - card.right() == pytest.approx(16)
+    assert canvas.available_rect().right() < card.left()
+
+
+def test_fit_fills_85_percent_of_limiting_dimension(qtbot, window):
+    canvas = window.canvas
+    canvas.fit()
+    avail = canvas.available_rect()
+    drawn = canvas.mapFromScene(canvas.inlet_scene.geometry_rect()).boundingRect()
+    fill = max(drawn.width() / avail.width(), drawn.height() / avail.height())
+    assert fill == pytest.approx(0.85, abs=0.01)
+    assert drawn.center().x() == pytest.approx(avail.center().x(), abs=2)
+    assert drawn.center().y() == pytest.approx(avail.center().y(), abs=2)
+
+
+def test_dimension_labels_do_not_collide_and_fit_includes_them(qtbot, window):
+    from busemann.canvas import picture as Pm
+
+    window.layer_actions["dimensions"].setChecked(True)
+    canvas = window.canvas
+    scene = canvas.inlet_scene
+    rects = scene.label_rects
+    assert len(rects) == len(scene.dim_labels) + 1                 # + the M∞ label
+    polygons, segments = scene.obstacles()
+    for i, r in enumerate(rects):
+        assert not any(Pm.rect_hits_polygon(r, p) for p in polygons)
+        assert not any(Pm.rect_hits_segment(r, a, b) for a, b in segments)
+        assert not any(Pm._rect_overlaps_rect(r, o) for o in rects[i + 1:])
+    visible = canvas.mapToScene(canvas.viewport().rect()).boundingRect()
+    assert visible.contains(scene.geometry_rect(include_labels=True))
+    texts = [lab.text() for lab in scene.dim_labels]
+    assert any(t.startswith("h_c ") and t.endswith("100.0 mm") for t in texts)
+    window.state.update(units="Imperial")
+    assert any(t.text().startswith("h_c ") and t.text().endswith("3.94 in")
+               for t in scene.dim_labels)
+
+
+def test_x15_four_ramp_shows_detached_cowl(qtbot, window):
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        window.state.update(mach=6.7, altitude_m=31000.0, n_ramps=4)
+    qtbot.waitUntil(lambda: not window.canvas.is_animating(), timeout=2000)
+    scene = window.canvas.inlet_scene
+    assert scene.bow_shock.isVisible()
+    assert "Illustrative only" in scene.bow_shock.toolTip()
+    assert "error" in window.results_panel.warning_levels()
+    assert any(t.startswith("External cowl shock detached")
+               for t in window.results_panel.warning_texts())
+    assert window.results_panel.warnings_box.property("level") == "error"
+
+
+def test_max_cowl_angle_constrains_design(qtbot, window):
+    panel = window.design_panel
+    panel.advanced.toggle.setChecked(True)
+    assert not window.state.inputs.max_cowl_enabled
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        panel.max_cowl_check.setChecked(True)
+    d = window.state.design
+    assert d.constrained and d.cowl_angle_deg <= 30.0 + 1e-9
+    badge = window.results_panel.cards["recovery_total"].badge
+    assert badge.isVisible() and badge.text() == "CONSTRAINED"
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        panel.max_cowl_check.setChecked(False)
+    assert not window.state.design.constrained and not badge.isVisible()
+
+
+def test_ramp_table_replaces_angle_lists(window):
+    table = window.design_panel.ramp_table
+    d = window.state.design
+    assert len(table.rows) == 2
+    assert table.text(0, 1) == f"{d.ramp_angles_deg[0]:.2f}"
+    assert table.text(1, 2) == f"{d.betas_deg[1]:.2f}"
+    assert table.text(1, 3) == f"{d.regions[2].M:.3f}"
+    assert window.design_panel.readout.text("margin") == f"{d.cowl_margin_deg:+.2f}"
+
+
+def test_error_card_wraps_with_non_breaking_spaces(qtbot, window):
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        window.state.update(method="custom", custom_angles=(12.0, 40.0))
+    overlay = window.canvas.overlay
+    assert "M = " in overlay.text() and " deg" in overlay.text()
+    assert overlay.width() <= 480
+    assert overlay.height() >= overlay.heightForWidth(overlay.width())

@@ -41,11 +41,16 @@ def space(n=1):
 
 
 # --- inlet canvas ---------------------------------------------------------------------
-# Sequential Mach tint, light (low M) -> darker blue (high M); low saturation so that the
-# drawing stays readable on top. Interpolated linearly between the stops.
-MACH_RAMP = ("#F7F9FC", "#EBF1F8", "#DDE7F3", "#CEDCEE", "#BFD1E8", "#AFC5E2", "#9FB9DB")
+# Diverging Mach map at M = 1, low saturation so amber shocks and grey walls stay legible.
+# Subsonic: warm sand, lightest next to M = 1 (index 0) and darker away from it.
+# Supersonic: light -> darker blue with Mach (interpolated across the supersonic bins).
+MACH_SUBSONIC = ("#F7F0E5", "#EFE2CD")
+MACH_SUPERSONIC = ("#E9F0F8", "#D3E1F1", "#BCD0E9", "#A4BFE0", "#8DAED7")
+REGION_BORDER_DARKER = 112   # QColor.darker() factor for the 1 px region outline
+LEGEND_INSET_PX = 16
+LEGEND_ALPHA = 0.9
+CANVAS_FILL = 0.85           # fit: drawing fills 85% of the limiting viewport dimension
 REGION_ALPHA = 0.9
 CANVAS_ANIM_MS = 150
 HOVER_PICK_PX = 6        # shock pick distance, screen px
-CANVAS_FIT_MARGIN_PX = 56
 SHADOW_ALPHA = 28        # hover card shadow (0-255), subtle

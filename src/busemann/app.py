@@ -163,9 +163,15 @@ def setup_application(app):
     return app
 
 
-def main(argv=None):
+def setup_high_dpi():
+    """Fractional Windows display scaling (125 %, 150 %) as-is: PassThrough rounding.
+    Must run before the QApplication is created."""
     QApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+
+
+def main(argv=None):
+    setup_high_dpi()
     app = QApplication.instance() or QApplication(sys.argv if argv is None else ["busemann", *argv])
     setup_application(app)
     window = MainWindow()

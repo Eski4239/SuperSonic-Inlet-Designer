@@ -132,7 +132,16 @@ QSlider::handle:horizontal {
     border-radius: ${radius}px;
     background: $surface;
 }
+#warningsBox[level="error"] { border-color: $error; }
+#errorRow { color: $error; }
 #errorText { color: $error; }
+#kpiBadge {
+    color: $accent;
+    font-size: ${size_label}px;
+    border: ${border_w}px solid $accent;
+    border-radius: 4px;
+    padding: 0px 4px;
+}
 
 /* --- chrome --------------------------------------------------------- */
 

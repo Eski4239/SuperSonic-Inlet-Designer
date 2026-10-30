@@ -147,6 +147,7 @@ class Skeleton:
     regions: tuple           # RegionState x (n + 2); duct reuses the last state if subsonic
     shocks: tuple            # ShockState per ramp shock (+ terminal)
     mass_capture: float
+    cowl_detached: bool = False   # external cowl turns more than theta_max(M_inf)
 
     @property
     def n(self):
@@ -189,6 +190,7 @@ def skeleton_from(design, off=None):
         off_design=off is not None, ramp_angles=tuple(design.ramp_angles_deg),
         flow_angles=flow, regions=regions, shocks=shocks,
         mass_capture=float(off.mass_capture_ratio) if off is not None else 1.0,
+        cowl_detached=bool(src.cowl_margin_deg is not None and src.cowl_margin_deg < 0.0),
     )
 
 
@@ -244,7 +246,8 @@ class Dimension:
     radius: float = 0.0      # angle only
     angles: tuple = ()       # angle only: (start, end) deg
     extra: tuple = ()        # callout only: values (x, y) in metres
-    text_at: tuple = None
+    text_at: tuple = None    # preferred label centre (model mm)
+    anchor: str = "center"   # label side relative to text_at: "center" | "left" | "right"
 
 
 @dataclass
@@ -261,9 +264,10 @@ class Picture:
     streamtube: list = field(default_factory=list)
     dimensions: list = field(default_factory=list)
     arrow: tuple = ()        # (tail, head)
+    bow_shock: list = field(default_factory=list)   # illustrative, only if the cowl detaches
 
     def bounds(self):
-        pts = list(self.domain) + list(self.ramp_body) + list(self.cowl_body)
+        pts = list(self.domain) + list(self.ramp_body) + list(self.cowl_body) + self.bow_shock
         xs, ys = zip(*pts)
         return min(xs), min(ys), max(xs), max(ys)
 
@@ -333,22 +337,41 @@ def build(sk):
     y_arrow = 0.62 * h
     pic.arrow = ((sk.x_left + 0.08 * h, y_arrow), (sk.x_left + 0.42 * h, y_arrow))
     pic.dimensions = _dimensions(sk, ramp_surface)
+    if sk.cowl_detached:
+        pic.bow_shock = bow_shock_curve(sk.lip, h)
     return pic
 
+
+def bow_shock_curve(lip, h, samples=25):
+    """Illustrative detached cowl bow shock: a parabola standing off ~0.05 h_c ahead of the
+    lip, sweeping back above the cowl. Its position is NOT computed by the model."""
+    vertex = (lip[0] - 0.05 * h, lip[1] + 0.02 * h)
+    up, down = 0.6 * h, 0.12 * h
+    k_up = 0.22 * h / up**2
+    pts = []
+    for j in range(samples):
+        y = -down + (up + down) * j / (samples - 1)
+        pts.append((vertex[0] + k_up * y * y, vertex[1] + y))
+    return pts
 
 def _dimensions(sk, ramp_surface):
     h = sk.h
     dims = []
-    # Ramp angles: arc at each corner between the incoming and outgoing wall directions.
+    ends = list(sk.corners) + [sk.foot]
+    # Ramp angles on the flow side: at a point Q on the outgoing wall, the angle between the
+    # wall (pointing back to the corner, a1 + 180) and a reference parallel to the incoming
+    # flow (a0 + 180) equals theta and lies above the wall, in the flow.
     for i in range(sk.n):
         c = sk.corners[i]
         a0, a1 = sk.flow_angles[i], sk.flow_angles[i + 1]
-        r = 0.32 * h
-        label_at = _add(c, _dir(a1 + 6.0), r * 1.45)      # just above the outgoing wall
-        dims.append(Dimension("angle", f"θ{i + 1}", sk.ramp_angles[i], (c,), radius=r,
-                              angles=(a0, a1), text_at=label_at))
+        seg = math.hypot(ends[i + 1][0] - c[0], ends[i + 1][1] - c[1])
+        d = min(0.45 * seg, 0.4 * h)
+        q = _add(c, _dir(a1), d)
+        r = 0.6 * d
+        label_at = _add(q, _dir(a0 + 180.0 - 0.5 * (a1 - a0) - 14.0), 1.5 * r)
+        dims.append(Dimension("angle", f"θ{i + 1}", sk.ramp_angles[i], (q,), radius=r,
+                              angles=(a0 + 180.0, a1 + 180.0), text_at=label_at))
     # Ramp lengths: offset dimension below each ramp segment.
-    ends = list(sk.corners) + [sk.foot]
     for i in range(sk.n):
         a, b = ends[i], ends[i + 1]
         nrm = _normal_downstream(sk.flow_angles[i] + 0.0)   # points below the wall
@@ -361,7 +384,7 @@ def _dimensions(sk, ramp_surface):
     x = sk.x_left - 0.12 * h
     dims.append(Dimension("linear", "h_c", sk.h / MM,
                           ((sk.x_left, 0.0), (sk.x_left, h), (x, 0.0), (x, h)),
-                          text_at=(x - 0.04 * h, 0.5 * h)))
+                          text_at=(x - 0.04 * h, 0.5 * h), anchor="right"))
     # Duct entry (throat) height along the terminal line, offset into the duct.
     duct = _dir(sk.phi_n)
     off = 0.35 * h
@@ -372,5 +395,123 @@ def _dimensions(sk, ramp_surface):
     # Lip position callout.
     dims.append(Dimension("callout", "lip", None, (sk.lip,),
                           extra=(sk.lip[0] / MM, sk.lip[1] / MM),
-                          text_at=_add(sk.lip, (-0.15 * h, 0.22 * h))))
+                          text_at=_add(sk.lip, (-0.15 * h, 0.22 * h)), anchor="right"))
     return dims
+
+
+# --- Mach bins (legend and region fills) ---------------------------------------------------
+
+_SUPERSONIC_STEPS = (0.05, 0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 5.0)
+MAX_BINS = 7
+
+
+def mach_bins(min_M, M_inf):
+    """Bin edges from min(0.5, min_M) to M_inf; M = 1 is always an edge (diverging map).
+
+    Subsonic: one bin, or two split at 0.75 when the range reaches below 0.75. Supersonic:
+    the smallest step in _SUPERSONIC_STEPS keeping the total at <= MAX_BINS; the last edge
+    is exactly M_inf.
+    """
+    lo = min(0.5, min_M)
+    edges = [lo, 0.75, 1.0] if lo < 0.75 - 1e-9 else [lo, 1.0]
+    if M_inf <= 1.0:
+        return edges
+    room = MAX_BINS - (len(edges) - 1)
+    for step in _SUPERSONIC_STEPS:
+        if math.ceil((M_inf - 1.0) / step - 1e-9) <= room:
+            break
+    k = 1
+    while 1.0 + k * step < M_inf - 1e-9:
+        edges.append(1.0 + k * step)
+        k += 1
+    edges.append(M_inf)
+    return edges
+
+
+def bin_index(M, edges):
+    """Index of the bin containing M (clamped to the end bins for drawing only)."""
+    for i in range(len(edges) - 1):
+        if M < edges[i + 1]:
+            return i
+    return len(edges) - 2
+
+
+# --- label placement --------------------------------------------------------------------
+
+def _rect_overlaps_rect(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _segments_cross(p, q, r, s):
+    d1 = _cross(_sub(q, p), _sub(r, p))
+    d2 = _cross(_sub(q, p), _sub(s, p))
+    d3 = _cross(_sub(s, r), _sub(p, r))
+    d4 = _cross(_sub(s, r), _sub(q, r))
+    return (d1 > 0) != (d2 > 0) and (d3 > 0) != (d4 > 0)
+
+
+def _rect_edges(rect):
+    x0, y0, x1, y1 = rect
+    c = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    return [(c[i], c[(i + 1) % 4]) for i in range(4)], c
+
+
+def _inside_rect(p, rect):
+    return rect[0] <= p[0] <= rect[2] and rect[1] <= p[1] <= rect[3]
+
+
+def rect_hits_segment(rect, a, b):
+    if _inside_rect(a, rect) or _inside_rect(b, rect):
+        return True
+    edges, _ = _rect_edges(rect)
+    return any(_segments_cross(a, b, e0, e1) for e0, e1 in edges)
+
+
+def rect_hits_polygon(rect, poly):
+    edges, corners = _rect_edges(rect)
+    if any(point_in_polygon(c, poly) for c in corners):
+        return True
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        if _inside_rect(a, rect) or any(_segments_cross(a, b, e0, e1) for e0, e1 in edges):
+            return True
+    return False
+
+
+def place_labels(labels, polygons=(), segments=(), scale=1.0, gap_px=4.0):
+    """Choose a centre for each label so it avoids obstacles and earlier labels.
+
+    labels: [(preferred_centre (model mm), width_px, height_px, anchor)], in priority order.
+    polygons / segments: obstacles in model mm. scale: screen px per mm.
+    Each label tries its preferred spot, then 4 offsets (above, below, outward, inward), in
+    rings of growing distance (1x, 2x, 3x label height + gap); the first spot without
+    overlap wins, else the one with the fewest overlaps.
+    Returns [(centre, rect)] with rect = (x0, y0, x1, y1) in model mm.
+    """
+    placed = []
+    for centre, w_px, h_px, anchor in labels:
+        w, hh = w_px / scale, h_px / scale
+        g = gap_px / scale
+        cx, cy = centre
+        if anchor == "right":
+            cx -= w / 2
+        elif anchor == "left":
+            cx += w / 2
+        out = -1.0 if anchor == "right" else 1.0
+        candidates = [(cx, cy)]
+        for ring in (1, 2, 3):
+            dy, dx = ring * (hh + g), ring * (w / 2 + g)
+            candidates += [(cx, cy + dy), (cx, cy - dy), (cx + out * dx, cy), (cx - out * dx, cy)]
+        best = None
+        for c in candidates:
+            rect = (c[0] - w / 2, c[1] - hh / 2, c[0] + w / 2, c[1] + hh / 2)
+            hits = sum(rect_hits_polygon(rect, p) for p in polygons if len(p) >= 3)
+            hits += sum(rect_hits_segment(rect, a, b) for a, b in segments)
+            hits += sum(_rect_overlaps_rect(rect, r) for _, r in placed)
+            if best is None or hits < best[0]:
+                best = (hits, c, rect)
+            if hits == 0:
+                break
+        placed.append((best[1], best[2]))
+    return placed

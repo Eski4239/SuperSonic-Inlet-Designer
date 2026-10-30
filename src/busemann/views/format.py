@@ -20,3 +20,16 @@ def sig(value, digits=4):
 
 def angles(values, decimals=2):
     return ", ".join(f"{v:.{decimals}f}" for v in values) if values else "—"
+
+
+_NBSP = " "
+
+
+def nbsp(text):
+    """Keep "M = 2.406", "28.75 deg", "0.28 deg" etc. on one line (non-breaking spaces)."""
+    if not text:
+        return text
+    import re
+
+    text = re.sub(r"(\b[A-Za-z_∞0]+) = (-?\d)", lambda m: f"{m.group(1)}{_NBSP}={_NBSP}{m.group(2)}", text)
+    return re.sub(r"(\d) (deg|K|kPa|Pa|m|mm|in|%)\b", lambda m: f"{m.group(1)}{_NBSP}{m.group(2)}", text)

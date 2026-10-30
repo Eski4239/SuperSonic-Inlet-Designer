@@ -107,3 +107,13 @@ def test_max_deflection_accepts_arrays():
     assert theta_max.shape == (3,)
     for i, m in enumerate(M):
         assert theta_max[i] == pytest.approx(obl.max_deflection(float(m))[0])
+
+
+@pytest.mark.parametrize("M1", [1.05, 1.2, 3.0, 6.7, 8.0])
+@pytest.mark.parametrize("theta", [1e-9, 1e-6, 1e-4, 1e-2])
+def test_weak_root_accurate_at_tiny_deflection(M1, theta):
+    """Regression (M3.1): the trigonometric cubic cancels as theta -> 0; polished root must
+    still invert theta_from_beta and stay just above the Mach angle."""
+    beta = obl.beta_from_theta(M1, theta)
+    assert obl.theta_from_beta(M1, beta) == pytest.approx(theta, rel=1e-6, abs=1e-13)
+    assert beta >= np.degrees(np.arcsin(1.0 / M1))

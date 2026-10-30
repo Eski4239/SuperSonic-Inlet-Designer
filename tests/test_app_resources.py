@@ -1,10 +1,13 @@
-"""Bundled app resources resolve to real files, from source and under PyInstaller (no Qt needed)."""
+"""Bundled app resources resolve to real files, from source and under PyInstaller."""
 import sys
 
 import pytest
 
-from busemann import paths
-from busemann.theme import tokens
+# busemann.theme imports Qt at package level, so this module needs PySide6 installed.
+pytest.importorskip("PySide6")
+
+from busemann import paths  # noqa: E402
+from busemann.theme import tokens  # noqa: E402
 
 
 def test_chevron_resolves_to_existing_file():

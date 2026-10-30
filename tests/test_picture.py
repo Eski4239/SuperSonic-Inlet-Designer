@@ -162,3 +162,18 @@ def test_rect_collision_helpers():
     assert P.rect_hits_polygon(rect, [(5, 5), (20, 5), (20, 20)])
     assert P.rect_hits_polygon(rect, [(-10, -10), (20, -10), (20, 20), (-10, 20)])  # inside
     assert not P.rect_hits_polygon(rect, [(20, 20), (30, 20), (30, 30)])
+
+
+# --- M4 STEP 0b: cowl lip wedge drawn at its real angle (2 deg minimum) -------------------
+
+@pytest.mark.parametrize("wedge, drawn, thickened", [(0.0, 2.0, True), (1.0, 2.0, True),
+                                                     (2.0, 2.0, False), (6.0, 6.0, False),
+                                                     (12.5, 12.5, False)])
+def test_cowl_drawn_with_actual_wedge(wedge, drawn, thickened):
+    d = api.design(3.0, 2, cowl_wedge=wedge)
+    pic = P.build(P.skeleton_from(d))
+    assert pic.skeleton.cowl_wedge_deg == wedge
+    assert pic.skeleton.wedge_thickened is thickened
+    lip, end = pic.cowl_outer
+    angle = math.degrees(math.atan2(end[1] - lip[1], end[0] - lip[0])) - d.cowl_angle_deg
+    assert angle == pytest.approx(drawn, abs=1e-9)

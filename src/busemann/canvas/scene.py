@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 
 from inletdesign import units as _units
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 from . import picture as P
 

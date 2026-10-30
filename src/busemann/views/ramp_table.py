@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 
 HEADERS = (("Ramp", ""), ("θ", "deg"), ("β", "deg"), ("M after", ""))

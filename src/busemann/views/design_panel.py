@@ -1,7 +1,7 @@
 """Design panel (spec 4.2): ramps, method, custom angles, capture height, read-only geometry."""
 import re
 
-from PySide6.QtWidgets import QCheckBox, QFormLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QFormLayout, QLabel, QVBoxLayout, QWidget
 
 from inletdesign import units as _units
 
@@ -61,13 +61,21 @@ class DesignPanel(QWidget):
             "external cowl shock attached. Costs recovery when active.")
         self.max_cowl = NumberField(i.max_cowl_deg, decimals=1, minimum=0.0, maximum=90.0,
                                     min_exclusive=True, unit="deg")
-        cowl_row = QWidget()
-        h = QHBoxLayout(cowl_row)
-        h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(tokens.space(1))
-        h.addWidget(self.max_cowl_check)
-        h.addWidget(self.max_cowl, 1)
-        self.advanced = CollapsibleSection("Advanced", cowl_row, collapsed=True)
+        self.wedge = NumberField(i.cowl_wedge_deg, decimals=1, minimum=0.0, maximum=30.0,
+                                 unit="deg")
+        self.wedge.setToolTip(
+            "Outer-surface wedge angle at the cowl lip, added to the turn the cowl imposes on "
+            "the flow at the lip. 0° = zero-thickness idealisation.")
+        advanced_box = QWidget()
+        grid = QFormLayout(advanced_box)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(tokens.space(1))
+        grid.setVerticalSpacing(tokens.space(1))
+        grid.addRow(self.max_cowl_check, self.max_cowl)
+        wedge_label = field_label("Cowl lip wedge")
+        wedge_label.setToolTip(self.wedge.toolTip())
+        grid.addRow(wedge_label, self.wedge)
+        self.advanced = CollapsibleSection("Advanced", advanced_box, collapsed=True)
 
         self.ramp_table = RampTable()
         self.ramp_table.setToolTip("Per ramp: incremental deflection θ, shock angle β (relative "
@@ -76,7 +84,8 @@ class DesignPanel(QWidget):
             ("throat", "Throat height", "length", "Lip to terminal-shock foot distance."),
             ("cowl", "Cowl angle", None, "Cowl / duct direction from the freestream axis."),
             ("margin", "Cowl margin", None,
-             "θ_max(M∞) − cowl angle: below 0 the external cowl shock detaches."),
+             "θ_max(M∞) − (cowl angle + lip wedge): below 0 the external cowl shock "
+             "detaches."),
         ])
 
         form = QFormLayout()
@@ -104,6 +113,7 @@ class DesignPanel(QWidget):
         self.method.changed.connect(self._set_method)
         self.max_cowl_check.toggled.connect(lambda on: state.update(max_cowl_enabled=on))
         self.max_cowl.value_changed.connect(lambda v: state.update(max_cowl_deg=v))
+        self.wedge.value_changed.connect(lambda v: state.update(cowl_wedge_deg=v))
         self.capture.value_changed.connect(
             lambda v: state.update(capture_height_m=_units.from_display(v, "length",
                                                                           state.inputs.units)))
@@ -154,6 +164,7 @@ class DesignPanel(QWidget):
         self.max_cowl_check.setChecked(i.max_cowl_enabled)
         self.max_cowl_check.blockSignals(False)
         self.max_cowl.set_value(i.max_cowl_deg)
+        self.wedge.set_value(i.cowl_wedge_deg)
         self.max_cowl.setEnabled(i.max_cowl_enabled and i.method != "custom")
         self.capture.set_decimals(_DECIMALS_LENGTH[system])
         self.capture.set_unit(_units.unit_label("length", system))

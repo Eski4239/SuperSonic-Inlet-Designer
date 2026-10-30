@@ -2,7 +2,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSlider, QVBoxLayout, QWidget
 
-from .. import theme
+from ..theme import qt as theme
 from .number_field import NumberField
 
 
@@ -49,6 +49,19 @@ class LabeledSlider(QWidget):
         """Programmatic update; does not emit."""
         self.field.set_value(value)
         self._set_slider(value)
+
+    def set_range(self, minimum, maximum):
+        """Change the slider/field range (keeps the step); does not emit."""
+        self._min = minimum
+        self.slider.blockSignals(True)
+        self.slider.setRange(0, round((maximum - minimum) / self._step))
+        self.slider.setPageStep(max(1, self.slider.maximum() // 20))
+        self.slider.blockSignals(False)
+        self.field.set_range(minimum, maximum)
+        self._set_slider(self.field.value())
+
+    def range(self):
+        return self._min, round(self._min + self.slider.maximum() * self._step, 10)
 
     def is_dragging(self):
         return self.slider.isSliderDown()

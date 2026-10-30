@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 MM = 1000.0              # api lengths are metres
 LEFT_MARGIN = 0.6        # x of the left edge of the drawing, in capture heights
 DUCT_LENGTH = 1.0        # drawn duct length, in capture heights
-COWL_WEDGE_DEG = 6.0     # drawn cowl wedge angle
+MIN_DRAWN_WEDGE_DEG = 2.0   # thinner cowl lip wedges are drawn at this angle for visibility
 WALL_THICKNESS = 0.07    # drawn wall hatch band, in capture heights
 _EPS = 1e-9
 
@@ -148,6 +148,16 @@ class Skeleton:
     shocks: tuple            # ShockState per ramp shock (+ terminal)
     mass_capture: float
     cowl_detached: bool = False   # external cowl turns more than theta_max(M_inf)
+    cowl_wedge_deg: float = 0.0   # cowl lip outer wedge (design input; 0 = zero thickness)
+
+    @property
+    def drawn_wedge_deg(self):
+        return max(self.cowl_wedge_deg, MIN_DRAWN_WEDGE_DEG)
+
+    @property
+    def wedge_thickened(self):
+        """True when the cowl is drawn thicker than the modelled wedge."""
+        return self.cowl_wedge_deg < MIN_DRAWN_WEDGE_DEG
 
     @property
     def n(self):
@@ -191,6 +201,7 @@ def skeleton_from(design, off=None):
         flow_angles=flow, regions=regions, shocks=shocks,
         mass_capture=float(off.mass_capture_ratio) if off is not None else 1.0,
         cowl_detached=bool(src.cowl_margin_deg is not None and src.cowl_margin_deg < 0.0),
+        cowl_wedge_deg=float(design.inputs.cowl_wedge_deg or 0.0),
     )
 
 
@@ -293,8 +304,9 @@ def build(sk):
     lower = [(p[0], p[1] - t) for p in ramp_surface[1:]]
     ramp_body = ramp_surface + lower[::-1] + [(le[0] + 2.5 * t, le[1] - t)]
 
-    wedge_len = DUCT_LENGTH * h / math.cos(math.radians(COWL_WEDGE_DEG))
-    cowl_outer_end = _add(sk.lip, _dir(sk.phi_n + COWL_WEDGE_DEG), wedge_len)
+    wedge = sk.drawn_wedge_deg
+    wedge_len = DUCT_LENGTH * h / math.cos(math.radians(wedge))
+    cowl_outer_end = _add(sk.lip, _dir(sk.phi_n + wedge), wedge_len)
     cowl_body = [sk.lip, cowl_end, cowl_outer_end]
 
     pic = Picture(skeleton=sk, domain=domain, ramp_surface=ramp_surface, ramp_body=ramp_body,

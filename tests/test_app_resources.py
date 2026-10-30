@@ -1,13 +1,14 @@
 """Bundled app resources resolve to real files, from source and under PyInstaller."""
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
-# busemann.theme imports Qt at package level, so this module needs PySide6 installed.
-pytest.importorskip("PySide6")
-
-from busemann import paths  # noqa: E402
-from busemann.theme import tokens  # noqa: E402
+# Pure Python: runs in the core CI job without PySide6 (the Qt loaders live in theme.qt).
+from busemann import paths
+from busemann.theme import tokens
 
 
 def test_chevron_resolves_to_existing_file():
@@ -45,3 +46,21 @@ def test_pyproject_ships_icons_and_fonts():
     patterns = data["tool"]["setuptools"]["package-data"]["busemann"]
     assert "resources/icons/*.svg" in patterns
     assert "resources/fonts/*.ttf" in patterns
+    assert "resources/data/*.json" in patterns
+
+
+def test_paths_and_tokens_import_without_qt():
+    """busemann.paths and busemann.theme.tokens must not pull in PySide6."""
+    code = "\n".join([
+        "import sys",
+        "sys.modules['PySide6'] = None      # any PySide6 import now raises ImportError",
+        "import busemann.paths, busemann.theme, busemann.theme.tokens",
+        "assert busemann.theme.tokens.COLORS['accent']",
+        "assert busemann.paths.resource_root().is_dir()",
+        "print('ok')",
+    ])
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         timeout=60, env={**os.environ, "PYTHONPATH": src})
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"

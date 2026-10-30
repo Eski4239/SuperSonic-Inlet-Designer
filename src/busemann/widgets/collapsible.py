@@ -2,7 +2,7 @@
 from PySide6.QtWidgets import QToolButton, QVBoxLayout, QWidget
 from PySide6.QtCore import Qt
 
-from .. import theme
+from ..theme import qt as theme
 
 
 class CollapsibleSection(QWidget):

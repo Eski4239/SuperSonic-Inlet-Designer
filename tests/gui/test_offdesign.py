@@ -1,0 +1,199 @@
+"""Off-design tab (M4): tab switch, slider <-> chart cursors, the light off-design job,
+CFD overlay rule, regime badge and results card."""
+import pytest
+
+pytest.importorskip("PySide6")
+pytest.importorskip("pytestqt")
+pytest.importorskip("pyqtgraph")
+
+from busemann.charts import model  # noqa: E402
+from inletdesign import api  # noqa: E402
+
+pytestmark = pytest.mark.gui
+
+
+def _design(qtbot, win, **changes):
+    with qtbot.waitSignal(win.state.design_ready, timeout=5000):
+        win.state.update(**changes)
+
+
+def _off(qtbot, win, M):
+    with qtbot.waitSignal(win.state.off_design_ready, timeout=5000):
+        win.state.update(off_design_mach=M)
+
+
+def _open_tab(qtbot, win):
+    win.tabs.setCurrentWidget(win.offdesign_tab)
+    qtbot.waitUntil(lambda: win.offdesign_tab.canvas.inlet_scene.picture is not None,
+                    timeout=3000)
+    return win.offdesign_tab
+
+
+def test_tab_switch_sets_view_and_toolbar_target(qtbot, window):
+    assert window.tabs.tabText(1) == "Off-design"
+    tab = _open_tab(qtbot, window)
+    assert window.state.active_view == "offdesign"
+    assert window.current_canvas() is tab.canvas
+    assert tab.chip.text() == "Design point: M 3.00, 2 ramps"
+    assert tab.slider.range() == (1.2, 4.5) and tab.slider.value() == 3.0
+    assert tab.regime() == "on-lip"
+    before = window.canvas.scale_factor()
+    window.zoom_in_action.trigger()
+    assert window.canvas.scale_factor() == before            # design canvas untouched
+    window.tabs.setCurrentWidget(window.canvas)
+    assert window.state.active_view == "design" and window.current_canvas() is window.canvas
+
+
+def test_slider_moves_every_chart_cursor_and_the_canvas(qtbot, window):
+    tab = _open_tab(qtbot, window)
+    with qtbot.waitSignal(window.state.off_design_ready, timeout=5000):
+        tab.slider.slider.setValue(round((2.5 - 1.2) / 0.01))       # user drag position
+    assert window.state.inputs.off_design_mach == pytest.approx(2.5)
+    for line in tab.charts.cursors.values():
+        assert line.value() == pytest.approx(2.5)
+    qtbot.waitUntil(lambda: not tab.canvas.is_animating(), timeout=2000)
+    pic = tab.canvas.inlet_scene.picture
+    assert pic.skeleton.off_design and pic.skeleton.mach == pytest.approx(2.5)
+    assert pic.shocks[0].end[0] < pic.skeleton.lip[0]                 # spillage ahead of lip
+    assert tab.regime() == "spillage"
+    expected = api.off_design_point(api.design(3.0, 2), 2.5)
+    assert tab.card.text("capture") == f"{expected.mass_capture_ratio:.3f}"
+    assert tab.card.delta("capture") == f"{expected.mass_capture_ratio - 1.0:+.3f}"
+    assert tab.card.text("margin") == f"{expected.cowl_margin_deg:+.2f}"
+    # the design canvas keeps showing the design point
+    assert not window.canvas.inlet_scene.picture.skeleton.off_design
+
+
+def test_dragging_a_chart_cursor_moves_the_slider(qtbot, window):
+    tab = _open_tab(qtbot, window)
+    with qtbot.waitSignal(window.state.off_design_ready, timeout=5000):
+        tab.charts.cursors["margin"].setValue(3.25)        # same path as a mouse drag
+    assert tab.slider.value() == pytest.approx(3.25)
+    assert window.state.inputs.off_design_mach == pytest.approx(3.25)
+    assert tab.charts.cursors["capture"].value() == pytest.approx(3.25)
+    assert tab.regime() == "shock-in-duct"
+
+
+def test_off_design_only_change_does_not_recompute_design(qtbot, window):
+    _open_tab(qtbot, window)
+    design = window.state.design
+    with qtbot.assertNotEmitted(window.state.design_ready, wait=200):
+        _off(qtbot, window, 2.8)
+    assert window.state.design is design
+    assert window.state.off_design.M_inf == pytest.approx(2.8)
+
+
+def test_stale_off_design_results_are_dropped(qtbot, window):
+    _open_tab(qtbot, window)
+    state = window.state
+    results = []
+    state.off_design_ready.connect(lambda off, err: results.append(off and off.M_inf))
+    for M in (2.5, 2.6, 2.7, 2.8):                  # faster than the debounce
+        state.update(off_design_mach=M)
+    qtbot.waitUntil(lambda: state.off_design is not None
+                    and state.off_design.M_inf == pytest.approx(2.8), timeout=3000)
+    assert results == [pytest.approx(2.8)]
+    # a late result of an older request is ignored
+    old = api.off_design_point(state.design, 2.5)
+    state._on_off_design_done(state._off_generation - 1,
+                              dict(design=state.design, off=old, off_error=None))
+    assert state.off_design.M_inf == pytest.approx(2.8)
+
+
+def test_below_detachment_shows_error_and_detached_regime(qtbot, window):
+    tab = _open_tab(qtbot, window)
+    _off(qtbot, window, 2.0)
+    assert tab.regime() == "detached"
+    assert tab.canvas.overlay.isVisible() and "shock detached" in tab.canvas.error_text
+    assert tab.canvas.is_dimmed()
+    assert tab.card.text("capture") == "—" and tab.card.text("regime") == "Detached"
+
+
+def test_design_mach_change_resets_slider_to_design(qtbot, window):
+    tab = _open_tab(qtbot, window)
+    _off(qtbot, window, 2.5)
+    _design(qtbot, window, mach=3.2)
+    assert window.state.inputs.off_design_mach is None
+    assert tab.slider.value() == pytest.approx(3.2)
+    assert tab.slider.range() == (1.2, pytest.approx(4.7))
+    assert tab.charts.cursor() == pytest.approx(3.2)
+
+
+@pytest.mark.parametrize("changes, visible", [
+    ({}, True),
+    ({"cowl_wedge_deg": 6.0}, True),                       # wedge changes no capture/recovery
+    ({"mach": 6.7, "n_ramps": 4}, False),                  # X-15
+    ({"n_ramps": 3}, False),
+    ({"max_cowl_enabled": True}, False),                   # cowl-constrained optimum
+    ({"gamma": 1.3}, False),
+])
+def test_cfd_overlay_only_for_the_validated_design(qtbot, window, changes, visible):
+    if changes:
+        _design(qtbot, window, **changes)
+    charts = _open_tab(qtbot, window).charts
+    assert charts.cfd_visible is visible
+    assert bool(charts.cfd_items) is visible
+    assert charts.cfd_note.isVisibleTo(window) is (not visible)
+    if not visible:
+        assert charts.cfd_note.text() == "CFD validation available for the M3 2-ramp design only"
+
+
+def test_cfd_markers_are_hollow_with_source_tooltips(qtbot, window):
+    charts = _open_tab(qtbot, window).charts
+    capture, recovery = charts.cfd_items
+    assert [p.pos().x() for p in capture.points()] == [2.5, 2.75, 3.0, 3.25]   # no M 3.5
+    assert recovery.opts["brush"].color().alpha() == 0                         # hollow
+    tip = recovery.points()[3].data()
+    assert "Phase 3d inviscid Fluent" in tip and "Mach reflection at lip" in tip
+    assert "M 3.5" in tip and "before the terminal shock" in tip
+    assert [p.pos().y() for p in recovery.points()] == [0.8466, 0.8283, 0.8011, 0.733]
+
+
+def test_regime_bands_use_the_wedge(qtbot, window):
+    charts = _open_tab(qtbot, window).charts
+    assert charts.band_labels == ["2nd ramp shock detached", "spillage",
+                                  "overspeed: shocks inside cowl"]
+    _design(qtbot, window, cowl_wedge_deg=6.0)
+    assert "cowl detached" in charts.band_labels
+    cowl = [b for b in charts.bands if b.kind == "cowl"]
+    assert cowl[0].hi == pytest.approx(2.6628, abs=1e-3)
+    assert "wedge 6°" in charts.legends["margin"].text()
+    assert any("upper bound — cowl shock not modelled" in p for p in charts.footer_parts)
+
+
+def test_above_design_lip_notice_has_cfd_tooltip(qtbot, window):
+    _open_tab(qtbot, window)
+    _off(qtbot, window, 3.25)
+    panel = window.results_panel
+    [i] = [k for k, t in enumerate(panel.warning_texts()) if t.startswith("Cowl lip shock")]
+    tip = panel._warning_labels[i].toolTip()
+    assert "Phase 3d CFD" in tip and "Mach reflection" in tip
+    # off-design notices are listed only while the off-design view is active
+    window.tabs.setCurrentWidget(window.canvas)
+    assert not any(t.startswith("Cowl lip shock") for t in panel.warning_texts())
+
+
+def test_slider_drag_stays_responsive(qtbot, window):
+    """60 drag steps 8 ms apart: the UI thread is never blocked for long, the debounce
+    coalesces work, and the final state is the last slider position."""
+    import time
+
+    tab = _open_tab(qtbot, window)
+    received = []
+    window.state.off_design_ready.connect(lambda off, err: received.append(off))
+    slider = tab.slider.slider
+    slider.setSliderDown(True)
+    gaps, last = [], time.perf_counter()
+    for k in range(60):
+        slider.setValue(round((2.45 - 1.2) / 0.01) + k)       # 2.45 .. 3.04
+        qtbot.wait(8)
+        now = time.perf_counter()
+        gaps.append((now - last) * 1000.0)
+        last = now
+    slider.setSliderDown(False)
+    qtbot.waitUntil(lambda: window.state.off_design is not None
+                    and window.state.off_design.M_inf == pytest.approx(3.04), timeout=3000)
+    assert max(gaps) < 100.0                       # event loop kept turning (ms per step)
+    assert len(received) < 60                      # debounce + stale drop coalesced work
+    assert tab.slider.value() == pytest.approx(3.04)
+    assert tab.charts.cursor() == pytest.approx(3.04)

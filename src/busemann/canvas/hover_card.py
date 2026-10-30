@@ -3,7 +3,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFrame, QGraphicsDropShadowEffect, QGridLayout, QLabel
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 
 
@@ -26,11 +26,13 @@ class HoverCard(QFrame):
         self._grid.setVerticalSpacing(2)
         self._labels = []
         self.title = ""
+        self.note = ""
         self.values = {}     # key -> raw float, for tests and future export
         self.hide()
 
-    def show_rows(self, title, rows, at):
-        """rows: (key, label, value float, text, unit). at: viewport position of the cursor."""
+    def show_rows(self, title, rows, at, note=""):
+        """rows: (key, label, value float, text, unit). at: viewport position of the cursor.
+        note: optional muted line under the rows."""
         for w in self._labels:
             w.deleteLater()
         self._labels = []
@@ -53,6 +55,12 @@ class HoverCard(QFrame):
             for c, w in enumerate((name, val, un)):
                 self._grid.addWidget(w, r, c)
                 self._labels.append(w)
+        self.note = note
+        if note:
+            hint = QLabel(note)
+            hint.setObjectName("hoverNote")
+            self._grid.addWidget(hint, len(rows) + 1, 0, 1, 3)
+            self._labels.append(hint)
         self.adjustSize()
         self.move_near(at)
         self.show()

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QFrame, QGraphicsView, QLabel
 
 from inletdesign import units as _units
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 from ..views import format as fmt
 from ..views.rows import region_rows, shock_rows
@@ -39,10 +39,14 @@ def nice_step(x):
 
 class InletCanvas(QGraphicsView):
     selection_changed = Signal(object, object, object)   # kind|None, index|None, payload|None
+    picture_changed = Signal()      # the region states shown changed (not per animation frame)
 
-    def __init__(self, state, parent=None):
+    def __init__(self, state, mode="design", parent=None):
+        """mode "design": the shock-on-lip design; "offdesign": its frozen geometry at the
+        off-design slider Mach (state.off_design)."""
         super().__init__(parent)
         self.state = state
+        self.mode = mode
         self.inlet_scene = InletScene(self)
         self.setScene(self.inlet_scene)
         self.setObjectName("inletCanvas")
@@ -71,6 +75,7 @@ class InletCanvas(QGraphicsView):
         self._anim.setStartValue(0.0)
         self._anim.setEndValue(1.0)
         self._anim.valueChanged.connect(self._frame)
+        self._anim.finished.connect(self._on_anim_finished)
         self._from = self._target = self._shown = None
 
         self.animations_enabled = True
@@ -83,7 +88,11 @@ class InletCanvas(QGraphicsView):
         self._press_at = None
         self._space = False
 
-        state.design_ready.connect(self._on_result)
+        if mode == "offdesign":
+            state.off_design_ready.connect(lambda *_: self._on_result(state.design,
+                                                                      state.design_error))
+        else:
+            state.design_ready.connect(self._on_result)
         state.inputs_changed.connect(self._on_inputs)
         self._set_overlay("Computing…", error=False)
         if state.design is not None or state.design_error is not None:
@@ -94,9 +103,17 @@ class InletCanvas(QGraphicsView):
         if result is None:
             self._show_error(error or "design failed")
             return
+        if self.mode != "offdesign":
+            self._clear_error()
+            self.show_skeleton(P.skeleton_from(result))
+            return
         if self.state.off_design_error:
+            if self.inlet_scene.picture is None:      # nothing shown yet: dim the design
+                self._render(P.skeleton_from(result))
             self._show_error(self.state.off_design_error)
             return
+        if self.state.off_design is None:
+            return                                    # not evaluated yet
         self._clear_error()
         self.show_skeleton(P.skeleton_from(result, self.state.off_design))
 
@@ -123,6 +140,10 @@ class InletCanvas(QGraphicsView):
             if self._auto_fit:
                 self.fit()
 
+    def _on_anim_finished(self):
+        if self._auto_fit:          # labels were re-placed on the final drawing: refit
+            self.fit()
+
     def is_animating(self):
         return self._anim.state() == QVariantAnimation.State.Running
 
@@ -132,6 +153,7 @@ class InletCanvas(QGraphicsView):
 
     def _render(self, sk):
         pic = P.build(sk)
+        new_states = self._shown is None or sk.regions is not self._shown.regions
         self.inlet_scene.set_picture(pic, self.state.inputs.units)
         self._shown = sk
         r = self.inlet_scene.geometry_rect()
@@ -140,6 +162,13 @@ class InletCanvas(QGraphicsView):
         self.inlet_scene.layout_labels(self.scale_factor())
         self._refresh_selection()
         self.viewport().update()
+        if new_states:
+            self.picture_changed.emit()
+
+    def region_states(self):
+        """RegionState per drawn region, in canvas index order ([] before the first draw)."""
+        pic = self.inlet_scene.picture
+        return [r.state for r in pic.regions] if pic is not None else []
 
     # --- error / overlay -----------------------------------------------------------------
     def _show_error(self, message):
@@ -189,16 +218,19 @@ class InletCanvas(QGraphicsView):
     def fit(self, pic=None):
         """Fill CANVAS_FILL of the limiting dimension of the available area, centred.
 
-        With Dimensions on, the placed label rects are part of the bounds; label size in
-        scene units depends on the zoom, so the fit is iterated.
+        The placed label rects (always the M∞ label, plus dimension labels when shown) are
+        part of the bounds; label size in scene units depends on the zoom, so the fit is
+        iterated. With a target `pic` (animation start) the last placed label rects are used.
         """
         self._auto_fit = True
         avail = self.available_rect()
-        with_labels = pic is None and self.inlet_scene.layer_visible("dimensions")
         s = self.scale_factor()
-        for _ in range(3 if with_labels else 1):
+        for _ in range(3 if pic is None else 1):
             if pic is not None:
                 x0, y0, x1, y1 = pic.bounds()
+                for r in self.inlet_scene.label_rects:
+                    x0, y0 = min(x0, r[0]), min(y0, r[1])
+                    x1, y1 = max(x1, r[2]), max(y1, r[3])
                 rect = QRectF(QPointF(x0, -y1), QPointF(x1, -y0))
             else:
                 self.inlet_scene.layout_labels(s)
@@ -280,6 +312,8 @@ class InletCanvas(QGraphicsView):
             if best is not None:
                 return "shock", best
         model = M(self.mapToScene(p.toPoint()))
+        if P.point_in_polygon(model, pic.cowl_body):
+            return "cowl", 0
         for region in pic.regions:
             if len(region.polygon) >= 3 and P.point_in_polygon(model, region.polygon):
                 return "region", region.index
@@ -288,6 +322,8 @@ class InletCanvas(QGraphicsView):
     def payload(self, kind, index):
         pic = self.inlet_scene.picture
         if pic is None or kind is None:
+            return None
+        if kind == "cowl":
             return None
         items = pic.regions if kind == "region" else pic.shocks
         return items[index].state if index < len(items) else None
@@ -318,6 +354,15 @@ class InletCanvas(QGraphicsView):
             return
         self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         pic = self.inlet_scene.picture
+        if kind == "cowl":
+            sk = pic.skeleton
+            rows = [("cowl_angle", "Cowl angle", sk.phi_n, f"{sk.phi_n:.2f}", "deg"),
+                    ("lip_wedge", "Lip wedge", sk.cowl_wedge_deg, f"{sk.cowl_wedge_deg:.2f}",
+                     "deg")]
+            note = (f"drawn thickened for visibility ({P.MIN_DRAWN_WEDGE_DEG:g}° wedge)"
+                    if sk.wedge_thickened else "")
+            self.hover_card.show_rows("Cowl", rows, QPointF(view_pos).toPoint(), note)
+            return
         if kind == "region":
             region = pic.regions[index]
             title, rows = region.name[:1].upper() + region.name[1:], region_rows(
@@ -368,7 +413,10 @@ class InletCanvas(QGraphicsView):
             moved = (event.position() - self._press_at).manhattanLength()
             self._press_at = None
             if moved < 4 and self.error_text is None:
-                self.select(*self.pick(event.position()))
+                kind, index = self.pick(event.position())
+                if kind == "cowl":          # hover-only: clicking the cowl clears selection
+                    kind, index = None, None
+                self.select(kind, index)
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):

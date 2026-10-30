@@ -1,16 +1,27 @@
 """Results panel (right): KPI cards, warnings, and the canvas selection. Region table in M4."""
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+)
 
 from inletdesign import units as _units
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 from ..widgets import KpiCard, section_title
 from . import format as fmt
 from .rows import region_rows, shock_rows
+from .station_table import StationTable
 
 SELECTION_HINT = "Click a region or shock on the canvas to inspect it."
+
+# One card per severity, most severe first: level -> (title, icon, colour token)
+NOTICE_LEVELS = {
+    "error": ("Errors", "alert-triangle", "error"),
+    "warn": ("Warnings", "alert-triangle", "warn"),
+    "info": ("Notes", "info", "accent"),
+}
+_ROW_NAMES = {"error": "errorRow", "warn": "warningRow", "info": "infoRow"}
 
 
 class ResultsPanel(QWidget):
@@ -33,14 +44,15 @@ class ResultsPanel(QWidget):
                                  "ρ∞ V∞ h_c (A0/Ac), per unit span."),
         }
 
-        self.warnings_box = QFrame()
-        self.warnings_box.setObjectName("warningsBox")
+        # Container of the notice cards (one per severity); its "level" is the worst one.
+        self.warnings_box = QWidget()
+        self.warnings_box.setObjectName("noticeCards")
         self._warnings_layout = QVBoxLayout(self.warnings_box)
-        self._warnings_layout.setContentsMargins(tokens.space(1) + 4, tokens.space(1),
-                                                 tokens.space(1) + 4, tokens.space(1))
-        self._warnings_layout.setSpacing(tokens.space(1) // 2)
+        self._warnings_layout.setContentsMargins(0, 0, 0, 0)
+        self._warnings_layout.setSpacing(tokens.space(1))
         self.warnings_box.hide()
-        self._warning_labels = []
+        self._warning_labels = []      # row widgets, in display order
+        self.notice_cards = []         # QFrame per shown severity, in display order
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(tokens.space(2), tokens.space(2), tokens.space(2), tokens.space(2))
@@ -48,6 +60,19 @@ class ResultsPanel(QWidget):
         layout.addWidget(section_title("Results"))
         for card in self.cards.values():
             layout.addWidget(card)
+        layout.addSpacing(tokens.space(1))
+        stations_head = QHBoxLayout()
+        stations_head.setContentsMargins(0, 0, 0, 0)
+        stations_head.addWidget(section_title("Stations"), 1)
+        self.copy_button = QPushButton("Copy table")
+        self.copy_button.setObjectName("linkButton")
+        self.copy_button.setToolTip("Copy the station table as tab-separated values")
+        self.copy_button.clicked.connect(self.copy_table)
+        stations_head.addWidget(self.copy_button)
+        layout.addLayout(stations_head)
+        self.station_table = StationTable()
+        self.station_table.setToolTip("Click a row to select that region on the canvas.")
+        layout.addWidget(self.station_table)
         layout.addSpacing(tokens.space(1))
         layout.addWidget(self.warnings_box)
         layout.addSpacing(tokens.space(1))
@@ -71,6 +96,8 @@ class ResultsPanel(QWidget):
         state.design_ready.connect(lambda *_: self.refresh())
         state.freestream_ready.connect(lambda *_: self.refresh())
         state.inputs_changed.connect(lambda *_: self.refresh())
+        state.off_design_ready.connect(lambda *_: self._set_warnings(state.notices()))
+        state.view_changed.connect(lambda *_: self._set_warnings(state.notices()))
         self.refresh()
 
     def refresh(self):
@@ -107,37 +134,55 @@ class ResultsPanel(QWidget):
             self.show_selection(*self._selection)
 
     def _set_warnings(self, notices):
-        """notices: [(level, text)]; "error" rows use the error colour and icon."""
-        for row in self._warning_labels:
-            row.deleteLater()
-        self._warning_labels = []
-        any_error = any(level == "error" for level, _ in notices)
-        self.warnings_box.setProperty("level", "error" if any_error else "warn")
-        self.warnings_box.style().unpolish(self.warnings_box)
-        self.warnings_box.style().polish(self.warnings_box)
-        warnings = notices
-        for level, text in warnings:
-            row = QWidget()
-            h = QHBoxLayout(row)
-            h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(tokens.space(1))
+        """notices: [(level, text, detail)]. One card per level, most severe first; each card
+        lists its notices in their original order. detail becomes the row tooltip."""
+        for card in self.notice_cards:
+            card.deleteLater()
+        self.notice_cards, self._warning_labels = [], []
+        shown = [lv for lv in NOTICE_LEVELS if any(n[0] == lv for n in notices)]
+        self.warnings_box.setProperty("level", shown[0] if shown else None)
+        for level in shown:
+            title, icon_name, colour = NOTICE_LEVELS[level]
+            items = [n for n in notices if n[0] == level]
+            card = QFrame()
+            card.setObjectName("noticeCard")
+            card.setProperty("level", level)
+            v = QVBoxLayout(card)
+            v.setContentsMargins(tokens.space(1) + 4, tokens.space(1), tokens.space(1) + 4,
+                                 tokens.space(1))
+            v.setSpacing(tokens.space(1) // 2)
+            head = QWidget()
+            hh = QHBoxLayout(head)
+            hh.setContentsMargins(0, 0, 0, 0)
+            hh.setSpacing(tokens.space(1))
             icon = QLabel()
-            icon.setPixmap(theme.icon("alert-triangle", "error" if level == "error" else "warn",
-                                      16).pixmap(16, 16))
-            icon.setAlignment(Qt.AlignmentFlag.AlignTop)
-            label = QLabel(fmt.nbsp(text[0].upper() + text[1:]))
-            label.setObjectName("errorRow" if level == "error" else "warningRow")
-            label.setProperty("level", level)
-            label.setWordWrap(True)
-            h.addWidget(icon)
-            h.addWidget(label, 1)
-            self._warnings_layout.addWidget(row)
-            self._warning_labels.append(row)
-        self.warnings_box.setVisible(bool(warnings))
+            icon.setPixmap(theme.icon(icon_name, colour, 16).pixmap(16, 16))
+            caption = QLabel(f"{title} ({len(items)})")
+            caption.setObjectName("noticeTitle")
+            caption.setProperty("level", level)
+            hh.addWidget(icon)
+            hh.addWidget(caption, 1)
+            v.addWidget(head)
+            for _, text, detail in items:
+                label = QLabel(fmt.nbsp(text[0].upper() + text[1:]))
+                label.setObjectName(_ROW_NAMES[level])
+                label.setProperty("level", level)
+                label.setWordWrap(True)
+                if detail:
+                    label.setToolTip(detail)
+                v.addWidget(label)
+                self._warning_labels.append(label)
+            self._warnings_layout.addWidget(card)
+            self.notice_cards.append(card)
+        self.warnings_box.setVisible(bool(shown))
+
+    def copy_table(self):
+        QApplication.clipboard().setText(self.station_table.to_tsv())
 
     # --- canvas selection ------------------------------------------------------------------
     def show_selection(self, kind, index, payload):
         self._selection = (kind, index, payload)
+        self.station_table.select_row(index if kind == "region" else None)
         for w in self._selection_widgets:
             w.deleteLater()
         self._selection_widgets = []
@@ -176,12 +221,14 @@ class ResultsPanel(QWidget):
         widget.style().polish(widget)
 
     def warning_texts(self):
-        return [self._row_label(row).text().replace("\u00a0", " ")
-                for row in self._warning_labels]
+        return [label.text().replace("\u00a0", " ") for label in self._warning_labels]
 
     def warning_levels(self):
-        return [self._row_label(row).property("level") for row in self._warning_labels]
+        return [label.property("level") for label in self._warning_labels]
+
+    def card_levels(self):
+        return [card.property("level") for card in self.notice_cards]
 
     @staticmethod
     def _row_label(row):
-        return row.findChild(QLabel, "warningRow") or row.findChild(QLabel, "errorRow")
+        return row

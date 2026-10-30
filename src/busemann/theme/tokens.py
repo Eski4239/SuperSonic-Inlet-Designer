@@ -33,6 +33,7 @@ RIGHT_PANEL_WIDTH = 320
 MIN_WINDOW = (1280, 800)
 
 DEBOUNCE_MS = 30
+OFFDESIGN_STRIP_H = 248   # px, chart strip under the off-design canvas
 
 
 def space(n=1):
@@ -44,7 +45,7 @@ def space(n=1):
 # Diverging Mach map at M = 1, low saturation so amber shocks and grey walls stay legible.
 # Subsonic: warm sand, lightest next to M = 1 (index 0) and darker away from it.
 # Supersonic: light -> darker blue with Mach (interpolated across the supersonic bins).
-MACH_SUBSONIC = ("#F7F0E5", "#EFE2CD")
+MACH_SUBSONIC = ("#F7F0E5", "#E6D2B5")   # CIEDE2000 9.6 apart (test: >= 8)
 MACH_SUPERSONIC = ("#E9F0F8", "#D3E1F1", "#BCD0E9", "#A4BFE0", "#8DAED7")
 REGION_BORDER_DARKER = 112   # QColor.darker() factor for the 1 px region outline
 LEGEND_INSET_PX = 16

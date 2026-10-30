@@ -10,11 +10,13 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import inlet as _inlet
-from .geometry import cowl_check
+from .geometry import cowl_check, cowl_lip_message
 from . import oblique_shock as obl
 
 COWL_ALIGNED_TOL_DEG = 1e-9   # cowl angle - lip flow angle at or below this: no cowl shock
-SUBSONIC_WARNING ="flow subsonic behind last ramp shock; no terminal normal shock"
+NO_RAMPS_MESSAGE = ("off-design evaluation needs at least one ramp "
+                    "(a 0-ramp normal-shock inlet has no ramp shocks to move)")
+SUBSONIC_WARNING = "flow subsonic behind last ramp shock; no terminal normal shock"
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,8 @@ class OffDesignResult:
     cowl_lip_region: int = None       # region containing the lip (0 = freestream)
     lip_mach: float = None
     lip_flow_angle_deg: float = None
-    cowl_required_turn_deg: float = None   # cowl angle - lip flow angle; <= 0: no cowl shock
+    cowl_required_turn_deg: float = None   # max(0, cowl - lip flow angle) + wedge
+    cowl_wedge_deg: float = 0.0           # cowl lip outer wedge (0 = zero thickness)
 
 
 def _side_of_line(point, origin, angle_deg):
@@ -57,8 +60,11 @@ def _segment_intersection(p1, d1, p2, d2):
     return p1 + t * d1, t, s
 
 
-def off_design(geom, M_inf, gamma=1.4):
+def off_design(geom, M_inf, gamma=1.4, cowl_wedge_deg=0.0):
     """Evaluate a fixed inlet geometry (ramp angles/corners/lip unchanged) at a new M_inf.
+
+    The cowl check turns the flow reaching the lip by max(0, cowl angle - lip flow angle)
+    plus the lip's outer wedge angle cowl_wedge_deg (0 = zero-thickness idealisation).
 
     If the flow behind the last ramp shock is subsonic (possible just above
     detachment), no terminal normal shock is applied: recovery_total equals
@@ -66,13 +72,15 @@ def off_design(geom, M_inf, gamma=1.4):
 
     Raises:
         ValueError: if any ramp shock detaches at the new M_inf
-            (message contains "shock detached").
+            (message contains "shock detached"), or if the geometry has no ramps.
     """
     h_c = geom.capture_height
     ramp_angles = geom.ramp_angles_deg
     ramp_points = geom.ramp_points
     lip = np.array(geom.lip)
     n = len(ramp_angles)
+    if n == 0:
+        raise ValueError(NO_RAMPS_MESSAGE)
     warnings = []
 
     phis = [0.0]
@@ -181,14 +189,18 @@ def off_design(geom, M_inf, gamma=1.4):
     lip_region = max(crossed_shocks) + 1 if crossed_shocks else 0
     lip_mach = float(machs[lip_region])
     lip_flow_angle = float(phis[lip_region])
-    required_turn = cowl_angle - lip_flow_angle
-    if required_turn <= COWL_ALIGNED_TOL_DEG:
-        # lip flow already turned to the cowl angle (or expanding): no cowl shock needed
-        cowl_margin = float(obl.max_deflection(lip_mach, gamma)[0]) - max(required_turn, 0.0) \
-            if lip_mach >= 1.0 else None
+    required_turn = max(0.0, cowl_angle - lip_flow_angle) + float(cowl_wedge_deg)
+    if lip_mach < 1.0:
+        # subsonic flow at the lip: no shock can form there, nothing to check
+        cowl_margin = None
+    elif required_turn <= COWL_ALIGNED_TOL_DEG:
+        # lip flow already turned to the cowl angle, zero-thickness lip: no cowl shock
+        cowl_margin = float(obl.max_deflection(lip_mach, gamma)[0]) - required_turn
     else:
         where = "M∞" if lip_region == 0 else "local M"
-        _, cowl_margin, _, cowl_message = cowl_check(lip_mach, required_turn, gamma, where)
+        _, cowl_margin, level, cowl_message = cowl_check(lip_mach, required_turn, gamma, where)
+        if cowl_message and lip_region == 0 and regime == "shock-in-duct":
+            cowl_message = cowl_lip_message(cowl_margin, level)
         if cowl_message:
             warnings.append(cowl_message)
 
@@ -210,4 +222,5 @@ def off_design(geom, M_inf, gamma=1.4):
         lip_mach=lip_mach,
         lip_flow_angle_deg=lip_flow_angle,
         cowl_required_turn_deg=float(required_turn),
+        cowl_wedge_deg=float(cowl_wedge_deg),
     )

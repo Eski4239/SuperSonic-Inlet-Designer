@@ -19,11 +19,12 @@ from . import inlet as _inlet
 from . import isentropic as _isen
 from . import oblique_shock as _obl
 from . import offdesign as _off
-from .geometry import build_geometry, cowl_check, design_inlet
+from .geometry import COWL_LIP_PREFIX, build_geometry, cowl_check, design_inlet
 
 REAL_GAS_T0_LIMIT = 800.0  # K; above this, vibrational excitation makes constant gamma questionable
 SUBSONIC_WARNING = _off.SUBSONIC_WARNING
 METHODS = ("oswatitsch", "custom")
+MAX_COWL_WEDGE_DEG = 30.0   # cowl lip outer wedge input range: 0 .. this (deg)
 
 
 class _Serialisable:
@@ -62,8 +63,9 @@ class RegionState(_Serialisable):
 
 @dataclass(frozen=True)
 class Notice(_Serialisable):
-    level: str           # "warn" or "error"
+    level: str           # "info", "warn" or "error"
     text: str
+    detail: str = None   # longer explanation (tooltip), or None
 
 
 @dataclass(frozen=True)
@@ -88,6 +90,7 @@ class DesignInputs(_Serialisable):
     capture_height: float
     gamma: float
     max_cowl_angle_deg: float = None   # optional limit on the Oswatitsch optimum
+    cowl_wedge_deg: float = 0.0        # cowl lip outer wedge; 0 = zero-thickness idealisation
 
 
 @dataclass(frozen=True)
@@ -141,7 +144,8 @@ class OffDesignResult(_Serialisable):
     cowl_lip_region: int = None     # region containing the cowl lip (0 = freestream)
     lip_mach: float = None
     lip_flow_angle_deg: float = None
-    cowl_required_turn_deg: float = None   # cowl angle - lip flow angle; <= 0: no cowl shock
+    cowl_required_turn_deg: float = None   # max(0, cowl - lip flow angle) + lip wedge
+    cowl_wedge_deg: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -291,7 +295,7 @@ def _flow_states(M, angles, betas, flow, gamma):
 
 
 @lru_cache(maxsize=256)
-def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None):
+def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None, wedge=0.0):
     if ramp_angles is None:
         method = "oswatitsch"
         geom = design_inlet(M, n_ramps, capture_height=capture_height, gamma=gamma,
@@ -312,12 +316,13 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None
     regions, shocks, recovery_oblique, recovery_total, M_duct, subsonic = _flow_states(
         M, angles, betas, flow, gamma)
     notices = [Notice("warn", SUBSONIC_WARNING)] if subsonic else []
+    # the lip's outer surface turns the freestream by the cowl angle plus the lip wedge
     theta_max_inf, cowl_margin, cowl_level, cowl_message = cowl_check(
-        M, float(geom.cowl_angle_deg), gamma)
+        M, float(geom.cowl_angle_deg) + wedge, gamma)
     if cowl_message:
         notices.append(Notice(cowl_level, cowl_message))
     if ramp_angles is not None and max_cowl is not None:
-        notices.append(Notice("warn", "max cowl angle applies to the Oswatitsch optimum only; "
+        notices.append(Notice("info", "max cowl angle applies to the Oswatitsch optimum only; "
                                       "ignored for custom angles"))
 
     geometry = DesignGeometry(
@@ -330,6 +335,7 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None
         ramp_angles_deg=() if ramp_angles is None else angles,
         capture_height=float(capture_height), gamma=float(gamma),
         max_cowl_angle_deg=None if max_cowl is None else float(max_cowl),
+        cowl_wedge_deg=float(wedge),
     )
     return DesignResult(
         inputs=inputs, ramp_angles_deg=angles, flow_angles_deg=tuple(flow), betas_deg=betas,
@@ -343,13 +349,16 @@ def _design_cached(M, n_ramps, capture_height, gamma, ramp_angles, max_cowl=None
     )
 
 
-def design(M, n_ramps, capture_height=0.1, gamma=1.4, ramp_angles=None, max_cowl_angle=None):
+def design(M, n_ramps, capture_height=0.1, gamma=1.4, ramp_angles=None, max_cowl_angle=None,
+           cowl_wedge=0.0):
     """Shock-on-lip design at Mach M.
 
     ramp_angles=None uses the Oswatitsch equal-strength optimum, optionally limited to
     a total turning (cowl angle) <= max_cowl_angle deg; otherwise the given incremental
     ramp angles (one per ramp) are checked against detachment and used directly.
-    The result reports the external-cowl detachment margin. Results are cached.
+    cowl_wedge (deg, 0-30) is the cowl lip's outer wedge angle, added to the turn the cowl
+    imposes; 0 is the zero-thickness idealisation. The result reports the external-cowl
+    detachment margin. Results are cached.
     """
     _check_mach(M)
     _check_gamma(gamma)
@@ -364,9 +373,18 @@ def design(M, n_ramps, capture_height=0.1, gamma=1.4, ramp_angles=None, max_cowl
         if not math.isfinite(max_cowl_angle) or max_cowl_angle <= 0:
             raise ValueError(f"max cowl angle must be > 0 deg (got {max_cowl_angle:g})")
         max_cowl_angle = round(float(max_cowl_angle), 10)
+    if not isinstance(cowl_wedge, (int, float)) or not math.isfinite(cowl_wedge) \
+            or not 0.0 <= cowl_wedge <= MAX_COWL_WEDGE_DEG:
+        raise ValueError(
+            f"cowl lip wedge must be 0-{MAX_COWL_WEDGE_DEG:g} deg (got {cowl_wedge!r})")
     # Round the cache key so float noise from sliders/unit conversions reuses entries.
     return _design_cached(round(float(M), 10), n_ramps, round(float(capture_height), 12),
-                          round(float(gamma), 10), angles, max_cowl_angle)
+                          round(float(gamma), 10), angles, max_cowl_angle,
+                          round(float(cowl_wedge), 10))
+
+
+def _wedge(design_result):
+    return design_result.inputs.cowl_wedge_deg or 0.0
 
 
 def _geometry_of(design_result):
@@ -375,9 +393,15 @@ def _geometry_of(design_result):
                           gamma=i.gamma)
 
 
+CFD_LIP_NOTE = ("Observed in Phase 3d CFD at M∞ 3.25: Mach reflection at the lip, recovery "
+                "4.9% below the ideal value.")
+
+
 def _notice(text):
     """Level of a core warning text: cowl detachment is an error, the rest are warnings."""
-    return Notice("error" if text.startswith("External cowl shock detached") else "warn", text)
+    error = text.startswith(("External cowl shock detached", f"{COWL_LIP_PREFIX} detached"))
+    detail = CFD_LIP_NOTE if text.startswith(COWL_LIP_PREFIX) else None
+    return Notice("error" if error else "warn", text, detail)
 
 
 def _convert_off(r, design_result):
@@ -400,6 +424,7 @@ def _convert_off(r, design_result):
         cowl_lip_region=int(r.cowl_lip_region), lip_mach=float(r.lip_mach),
         lip_flow_angle_deg=float(r.lip_flow_angle_deg),
         cowl_required_turn_deg=float(r.cowl_required_turn_deg),
+        cowl_wedge_deg=float(r.cowl_wedge_deg),
     )
 
 
@@ -410,7 +435,8 @@ def off_design_point(design_result, M):
     """
     _check_mach(M)
     return _convert_off(_off.off_design(_geometry_of(design_result), float(M),
-                                        design_result.inputs.gamma), design_result)
+                                        design_result.inputs.gamma, _wedge(design_result)),
+                        design_result)
 
 
 def _attached(design_result, M):
@@ -441,7 +467,9 @@ def detachment_mach(design_result, tol=1e-5):
 
 
 def off_design_sweep(design_result, M_min, M_max, n):
-    """Evaluate n equally spaced Mach numbers in [M_min, M_max]; None where detached."""
+    """Evaluate n equally spaced Mach numbers in [M_min, M_max]; None where detached.
+
+    Raises ValueError for a 0-ramp design (no off-design model)."""
     _check_mach(M_min)
     if not M_max > M_min:
         raise ValueError("M_max must be greater than M_min")
@@ -453,7 +481,8 @@ def off_design_sweep(design_result, M_min, M_max, n):
     points = []
     for M in machs:
         try:
-            points.append(_convert_off(_off.off_design(geom, M, gamma), design_result))
+            points.append(_convert_off(_off.off_design(geom, M, gamma, _wedge(design_result)),
+                                       design_result))
         except ValueError as exc:
             if "shock detached" not in str(exc):
                 raise

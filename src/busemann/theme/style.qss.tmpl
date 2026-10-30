@@ -32,6 +32,7 @@ QScrollArea { border: none; background: $surface; }
 }
 
 #muted { color: $text_muted; font-size: ${size_label}px; }
+#chartLegend { color: $text_muted; font-size: ${size_label}px; }
 
 #unit, #readoutUnit {
     font-family: "$font_mono", "$font_mono_fallback";
@@ -126,15 +127,63 @@ QSlider::handle:horizontal {
 }
 #kpiSub { color: $text_muted; font-size: ${size_label}px; }
 
-#warningRow { color: $text; }
-#warningsBox {
+#warningRow, #infoRow { color: $text; }
+#noticeCard {
     border: ${border_w}px solid $warn;
     border-radius: ${radius}px;
     background: $surface;
 }
-#warningsBox[level="error"] { border-color: $error; }
+#noticeCard[level="error"] { border-color: $error; }
+#noticeCard[level="info"] { border-color: $border; }
+#noticeTitle { font-weight: 600; color: $text; }
+#noticeTitle[level="error"] { color: $error; }
 #errorRow { color: $error; }
 #errorText { color: $error; }
+#stationTable {
+    font-family: "$font_mono", "$font_mono_fallback";
+    font-size: ${size_label}px;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+    background: $surface;
+    selection-background-color: $bg;
+    selection-color: $accent;
+}
+#stationTable QHeaderView::section {
+    background: $surface;
+    color: $text_muted;
+    border: none;
+    border-bottom: ${border_w}px solid $border;
+    padding: 2px 2px;
+    font-size: ${size_label}px;
+}
+#stationTable::item { padding: 0px; }
+#linkButton {
+    border: none;
+    background: transparent;
+    color: $accent;
+    font-size: ${size_label}px;
+    padding: 0px;
+}
+#linkButton:hover { text-decoration: underline; }
+#chip {
+    color: $text;
+    background: $bg;
+    border: ${border_w}px solid $border;
+    border-radius: ${radius}px;
+    padding: 4px ${s1}px;
+}
+#regimeBadge {
+    font-weight: 600;
+    border-radius: ${radius}px;
+    padding: 4px ${s1}px;
+    min-width: 96px;
+    color: $surface;
+    background: $text_muted;
+}
+#regimeBadge[regime="spillage"] { background: $accent; }
+#regimeBadge[regime="on-lip"] { background: $ok; }
+#regimeBadge[regime="shock-in-duct"] { background: $warn; }
+#regimeBadge[regime="detached"] { background: $error; }
 #kpiBadge {
     color: $accent;
     font-size: ${size_label}px;
@@ -198,6 +247,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none;
     border-radius: ${radius}px;
 }
 #hoverTitle { font-weight: 600; color: $text; padding-bottom: 2px; }
+#hoverNote { color: $text_muted; font-style: italic; padding-top: 2px; }
 
 #canvasOverlay {
     background: $surface;

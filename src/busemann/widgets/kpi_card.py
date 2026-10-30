@@ -1,7 +1,7 @@
 """KPI card: uppercase title, large mono value, muted mono unit, optional sub-line."""
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 
 EMPTY = "—"

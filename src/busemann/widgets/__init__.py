@@ -2,7 +2,7 @@
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QLabel
 
-from .. import theme
+from ..theme import qt as theme
 from .collapsible import CollapsibleSection
 from .kpi_card import KpiCard
 from .labeled_slider import LabeledSlider

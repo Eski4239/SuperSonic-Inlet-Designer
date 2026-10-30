@@ -183,3 +183,13 @@ def test_sweep_near_detachment_never_raises_unexpectedly():
             assert SUBSONIC_WARNING not in r.warnings
             assert r.recovery_total < r.recovery_oblique
     assert n_subsonic > 0  # the band exists for this design
+
+
+def test_zero_ramp_geometry_has_no_off_design_model():
+    from inletdesign import api
+
+    d = api.design(3.0, 0)
+    with pytest.raises(ValueError, match="needs at least one ramp"):
+        api.off_design_point(d, 3.0)
+    with pytest.raises(ValueError, match="needs at least one ramp"):
+        api.off_design_sweep(d, 2.0, 4.0, 5)

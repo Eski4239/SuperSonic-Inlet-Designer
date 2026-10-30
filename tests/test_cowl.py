@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 import pytest
+from scipy.optimize import brentq
 
 from inletdesign import api
 from inletdesign import oblique_shock as obl
@@ -10,7 +11,8 @@ from inletdesign.geometry import COWL_MARGIN_WARN_DEG, cowl_check
 
 
 def _cowl_notices(result):
-    return [n for n in result.notices if n.text.startswith(("Cowl near", "External cowl"))]
+    return [n for n in result.notices
+            if n.text.startswith(("Cowl near", "External cowl", "Cowl lip"))]
 
 
 # SOURCE: M3.1 review request (user-stated expectations: M3 2-ramp margin 0.28 +/- 0.01 deg,
@@ -150,3 +152,75 @@ def test_invalid_limit_and_custom_angles():
     d = api.design(3.0, 2, ramp_angles=[10.0, 12.0], max_cowl_angle=15.0)
     assert not d.constrained
     assert any("ignored for custom angles" in w for w in d.warnings)
+
+
+# --- STEP 0b: cowl lip wedge -------------------------------------------------------------
+
+# SOURCE: M4 STEP 0b request (user-stated expectations: M3 2-ramp with a 6 deg lip wedge is
+# detached at M 2.45 and 2.5, attached at 2.75; at design the margin drops by exactly 6 deg).
+def test_wedge_six_detaches_below_attach_mach():
+    d = api.design(3.0, 2, cowl_wedge=6.0)
+    for M in (2.45, 2.5):
+        r = api.off_design_point(d, M)
+        assert r.cowl_margin_deg < 0 and r.cowl_wedge_deg == 6.0
+        assert r.cowl_required_turn_deg == pytest.approx(6.0, abs=1e-9)
+        assert [n.level for n in _cowl_notices(r)] == ["error"]
+    attached = api.off_design_point(d, 2.75)
+    assert attached.cowl_margin_deg > 0
+    assert all(n.level != "error" for n in attached.notices)
+    attach = brentq(lambda M: api.off_design_point(d, M).cowl_margin_deg, 2.5, 2.75, xtol=1e-10)
+    assert 2.5 < attach < 2.75      # 2.66280 (reported in M4 STEP 0b)
+    json.dumps(attached.to_dict())
+
+
+def test_wedge_lowers_design_margin_by_exactly_its_angle():
+    free, wedged = api.design(3.0, 2), api.design(3.0, 2, cowl_wedge=6.0)
+    assert wedged.cowl_margin_deg == pytest.approx(free.cowl_margin_deg - 6.0, abs=1e-12)
+    assert wedged.inputs.cowl_wedge_deg == 6.0
+    on0, on6 = api.off_design_point(free, 3.0), api.off_design_point(wedged, 3.0)
+    assert on6.cowl_margin_deg == pytest.approx(on0.cowl_margin_deg - 6.0, abs=1e-12)
+    # capture and recovery do not depend on the wedge
+    assert (on6.mass_capture_ratio, on6.recovery_total) == (on0.mass_capture_ratio,
+                                                            on0.recovery_total)
+
+
+def test_zero_wedge_is_the_default_everywhere():
+    a, b = api.design(3.0, 2), api.design(3.0, 2, cowl_wedge=0.0)
+    assert a is b                                       # same cache entry
+    sweep = api.off_design_sweep(a, 2.4, 3.5, 23)
+    for M, p in zip(sweep.machs, sweep.points):
+        q = api._convert_off(api._off.off_design(api._geometry_of(a), M, 1.4), a)
+        assert p == q
+
+
+def test_invalid_wedge_raises():
+    for bad in (-1.0, 31.0, float("nan")):
+        with pytest.raises(ValueError, match="cowl lip wedge"):
+            api.design(3.0, 2, cowl_wedge=bad)
+
+
+def test_subsonic_lip_flow_with_wedge_has_no_margin():
+    d = api.design(3.0, 2, cowl_wedge=6.0)
+    r = api.off_design_point(d, 2.40)
+    assert r.lip_mach < 1.0 and r.cowl_margin_deg is None and not _cowl_notices(r)
+
+
+# --- STEP 0c: above-design wording -------------------------------------------------------
+
+def test_above_design_message_points_at_mach_reflection():
+    d = api.design(3.0, 2)
+    r = api.off_design_point(d, 3.25)
+    [n] = _cowl_notices(r)
+    assert n.level == "warn"
+    assert n.text == (f"Cowl lip shock near detachment (θ_max − turn = "
+                      f"{r.cowl_margin_deg:.2f}°): Mach reflection at the lip likely; "
+                      "recovery below the ideal value")
+    assert f"{r.cowl_margin_deg:.2f}" == "1.82"
+    assert n.detail == ("Observed in Phase 3d CFD at M∞ 3.25: Mach reflection at the lip, "
+                        "recovery 4.9% below the ideal value.")
+    # at the design point the design-check wording is kept
+    [on] = _cowl_notices(api.off_design_point(d, 3.0))
+    assert on.text.startswith("Cowl near shock detachment") and on.detail is None
+    # detached above design: error, same wording family
+    [err] = _cowl_notices(api.off_design_point(api.design(3.0, 2, cowl_wedge=6.0), 3.25))
+    assert err.level == "error" and err.text.startswith("Cowl lip shock detached")

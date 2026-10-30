@@ -98,7 +98,9 @@ def test_panels_collapse(window):
 
 
 def test_status_bar(window):
-    assert window.compute_label.text().endswith(" ms")
+    # the start-up design may already be in the api cache from an earlier test
+    text = window.compute_label.text()
+    assert text == "cached" or (text.startswith("Computed in") and text.endswith(" ms"))
     assert window.model_label.text() == "Ideal gas, γ = 1.40"
 
 
@@ -110,3 +112,19 @@ def test_inletdesign_gui_subcommand_launches_app(monkeypatch):
     monkeypatch.setattr(busemann.app, "main", lambda argv: calls.append(argv) or 0)
     assert main(["gui"]) == 0
     assert calls == [[]]
+
+
+def test_status_says_cached_on_a_cache_hit(qtbot, window):
+    from inletdesign import api
+
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        window.state.update(mach=3.137)
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        window.state.update(mach=3.0)                     # computed at start-up: cached
+    assert window.compute_label.text() == "cached"
+    assert window.state.compute_cached
+    api._design_cached.cache_clear()
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        window.state.update(mach=3.137)
+    assert window.compute_label.text().startswith("Computed in")     # cache was cleared
+    assert not window.state.compute_cached

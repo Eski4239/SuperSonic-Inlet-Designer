@@ -8,11 +8,13 @@ from PySide6.QtWidgets import (
     QToolBar, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import __version__, theme
+from . import __version__
+from .theme import qt as theme
 from .canvas import InletCanvas
 from .state import AppState
 from .theme import tokens
 from .views import DesignPanel, FlightPanel, ResultsPanel
+from .views.offdesign_tab import OffDesignTab
 from .widgets import divider
 
 
@@ -55,6 +57,9 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(self.canvas, "Design")
+        self.offdesign_tab = OffDesignTab(self.state)
+        self.tabs.addTab(self.offdesign_tab, "Off-design")
+        self.tabs.currentChanged.connect(self._on_tab)
 
         centre = QWidget()
         centre.setObjectName("canvasHost")
@@ -73,7 +78,12 @@ class MainWindow(QMainWindow):
         slider = self.flight_panel.mach.slider
         slider.sliderPressed.connect(lambda: self.canvas.set_animations_enabled(False))
         slider.sliderReleased.connect(lambda: self.canvas.set_animations_enabled(True))
-        self.canvas.selection_changed.connect(self.results_panel.show_selection)
+        for canvas in self.canvases():
+            canvas.selection_changed.connect(
+                lambda *sel, c=canvas: self._on_selection(c, *sel))
+            canvas.picture_changed.connect(lambda c=canvas: self._on_picture(c))
+        self.results_panel.station_table.row_clicked.connect(
+            lambda row: self.current_canvas().select("region", row))
 
         self.state.busy_changed.connect(self.busy.setVisible)
         self.state.compute_time_changed.connect(lambda _ms: self._update_status())
@@ -101,12 +111,12 @@ class MainWindow(QMainWindow):
         bar.addSeparator()
         self.zoom_in_action = QAction(theme.icon("zoom-in", "text"), "Zoom in", self)
         self.zoom_in_action.setShortcut(QKeySequence.StandardKey.ZoomIn)
-        self.zoom_in_action.triggered.connect(self.canvas.zoom_in)
+        self.zoom_in_action.triggered.connect(lambda: self.current_canvas().zoom_in())
         self.zoom_out_action = QAction(theme.icon("zoom-out", "text"), "Zoom out", self)
         self.zoom_out_action.setShortcut(QKeySequence.StandardKey.ZoomOut)
-        self.zoom_out_action.triggered.connect(self.canvas.zoom_out)
+        self.zoom_out_action.triggered.connect(lambda: self.current_canvas().zoom_out())
         self.fit_action = QAction(theme.icon("maximize", "text"), "Fit drawing (F)", self)
-        self.fit_action.triggered.connect(lambda: self.canvas.fit())
+        self.fit_action.triggered.connect(lambda: self.current_canvas().fit())
         for action in (self.zoom_in_action, self.zoom_out_action, self.fit_action):
             bar.addAction(action)
 
@@ -118,14 +128,42 @@ class MainWindow(QMainWindow):
             action.setCheckable(True)
             action.setChecked(on)
             action.setToolTip(f"Show {label.lower()} on the canvas")
-            action.toggled.connect(lambda v, n=name: self.canvas.set_layer_visible(n, v))
-            self.canvas.set_layer_visible(name, on)
+            action.toggled.connect(lambda v, n=name: self._set_layer(n, v))
+            self._set_layer(name, on)
             button = QToolButton()
             button.setObjectName("layerToggle")
             button.setDefaultAction(action)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
             bar.addWidget(button)
             self.layer_actions[name] = action
+
+    def canvases(self):
+        return (self.canvas, self.offdesign_tab.canvas)
+
+    def current_canvas(self):
+        return self.offdesign_tab.canvas if self.tabs.currentWidget() is self.offdesign_tab             else self.canvas
+
+    def _set_layer(self, name, visible):
+        for canvas in self.canvases():
+            canvas.set_layer_visible(name, visible)
+
+    def _on_tab(self, _index):
+        view = "offdesign" if self.tabs.currentWidget() is self.offdesign_tab else "design"
+        self.state.set_active_view(view)
+        canvas = self.current_canvas()
+        self.results_panel.station_table.set_regions(canvas.region_states())
+        self.results_panel.show_selection(*canvas.selection, canvas.payload(*canvas.selection))
+
+    def _on_selection(self, canvas, kind, index, payload):
+        """Results panel and station table follow the canvas of the visible tab."""
+        if canvas is self.current_canvas():
+            self.results_panel.show_selection(kind, index, payload)
+
+    def _on_picture(self, canvas):
+        if canvas is self.current_canvas():
+            self.results_panel.station_table.set_regions(canvas.region_states())
+            self.results_panel.station_table.select_row(
+                canvas.selection[1] if canvas.selection[0] == "region" else None)
 
     def _build_status_bar(self):
         status = self.statusBar()
@@ -147,7 +185,13 @@ class MainWindow(QMainWindow):
 
     def _update_status(self):
         ms = self.state.compute_ms
-        self.compute_label.setText("Computing…" if ms is None else f"Computed in {ms:.0f} ms")
+        if ms is None:
+            text = "Computing…"
+        elif self.state.compute_cached:
+            text = "cached"
+        else:
+            text = f"Computed in {ms:.0f} ms"
+        self.compute_label.setText(text)
         self.model_label.setText(f"Ideal gas, γ = {self.state.inputs.gamma:.2f}")
         self.units_label.setText(self.state.inputs.units)
 

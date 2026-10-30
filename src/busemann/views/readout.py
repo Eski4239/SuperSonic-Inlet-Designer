@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
 
 from inletdesign import units as _units
 
-from .. import theme
+from ..theme import qt as theme
 from ..theme import tokens
 from . import format as fmt
 

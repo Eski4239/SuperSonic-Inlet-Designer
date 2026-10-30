@@ -160,17 +160,6 @@ def test_animation_disabled_while_slider_dragged(qtbot, window):
     assert window.canvas.animations_enabled
 
 
-def test_off_design_mach_moves_shocks(qtbot, window):
-    canvas = window.canvas
-    _set(qtbot, window, off_design_mach=2.5)
-    pic = canvas.inlet_scene.picture
-    assert pic.skeleton.off_design
-    assert pic.shocks[0].end[0] < pic.skeleton.lip[0]          # spillage ahead of the lip
-    assert pic.regions[1].state.M == pytest.approx(window.state.off_design.regions[1].M)
-    _set(qtbot, window, off_design_mach=None)
-    assert canvas.inlet_scene.picture.shocks[0].end == pytest.approx(pic.skeleton.lip)
-
-
 def test_units_switch_relabels_dimensions(qtbot, window):
     window.layer_actions["dimensions"].setChecked(True)
     window.state.update(units="Imperial")
@@ -290,3 +279,81 @@ def test_error_card_wraps_with_non_breaking_spaces(qtbot, window):
     assert "M = " in overlay.text() and " deg" in overlay.text()
     assert overlay.width() <= 480
     assert overlay.height() >= overlay.heightForWidth(overlay.width())
+
+
+@pytest.mark.parametrize("wedge, noted", [(0.0, True), (6.0, False)])
+def test_cowl_hover_notes_thickened_drawing(qtbot, window, wedge, noted):
+    if window.state.inputs.cowl_wedge_deg != wedge:
+        _set(qtbot, window, cowl_wedge_deg=wedge)
+    canvas = window.canvas
+    _hover(qtbot, canvas, P.polygon_centroid(canvas.inlet_scene.picture.cowl_body))
+    assert canvas.hovered == ("cowl", 0)
+    assert canvas.hover_card.title == "Cowl"
+    assert canvas.hover_card.values["lip_wedge"] == wedge
+    assert ("drawn thickened for visibility" in canvas.hover_card.note) is noted
+
+
+def test_wedge_field_in_advanced_drives_design(qtbot, window):
+    panel = window.design_panel
+    assert window.state.inputs.cowl_wedge_deg == 0.0
+    assert "zero-thickness" in panel.wedge.toolTip()
+    with qtbot.waitSignal(window.state.design_ready, timeout=5000):
+        panel.wedge.set_value(6.0)
+        panel.wedge.value_changed.emit(6.0)
+    assert window.state.design.inputs.cowl_wedge_deg == 6.0
+    assert window.state.design.cowl_margin_deg == pytest.approx(
+        api.design(3.0, 2).cowl_margin_deg - 6.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("changes", [{}, {"n_ramps": 4}, {"mach": 6.7, "n_ramps": 4}])
+def test_mach_label_pill_never_clipped(qtbot, window, changes):
+    if changes:
+        _set(qtbot, window, **changes)
+    canvas = window.canvas
+    canvas.fit()
+    visible = canvas.mapToScene(canvas.viewport().rect()).boundingRect()
+    x0, y0, x1, y1 = canvas.inlet_scene.label_rects[0]          # M∞ label, model mm
+    assert visible.contains(QRectF(QPointF(x0, -y1), QPointF(x1, -y0)))
+
+
+# Thresholds (CIEDE2000, chosen in M4 STEP 1): the two subsonic bins >= 8 so they read as
+# clearly different; every pair of adjacent bins >= 5; shocks stay far from every fill.
+SUBSONIC_MIN_DE, ADJACENT_MIN_DE, SHOCK_MIN_DE = 8.0, 5.0, 20.0
+
+
+@pytest.mark.parametrize("min_M, M_inf", [(0.3, 2.0), (0.699, 3.0), (0.628, 6.7), (0.62, 4.5),
+                                          (0.9, 1.2), (0.5, 10.0)])
+def test_adjacent_mach_bins_are_distinguishable(min_M, M_inf):
+    from busemann.canvas.scene import bin_colors
+    from busemann.theme import tokens
+    from tests.colour_difference import delta_e
+
+    edges = P.mach_bins(min_M, M_inf)
+    colours = [c.name() for c in bin_colors(edges)]
+    for a, b in zip(colours, colours[1:]):
+        assert delta_e(a, b) >= ADJACENT_MIN_DE, (a, b)
+    assert delta_e(*tokens.MACH_SUBSONIC) >= SUBSONIC_MIN_DE
+    for c in colours:
+        assert delta_e(tokens.COLORS["shock"], c) >= SHOCK_MIN_DE
+
+
+def test_one_notice_card_per_severity_in_order(qtbot, window):
+    panel = window.results_panel
+    panel._set_warnings([("info", "a note", None), ("warn", "first warning", None),
+                         ("error", "an error", "why"), ("warn", "second warning", None)])
+    assert panel.card_levels() == ["error", "warn", "info"]
+    assert panel.warning_texts() == ["An error", "First warning", "Second warning", "A note"]
+    assert panel.warning_levels() == ["error", "warn", "warn", "info"]
+    assert panel.warnings_box.property("level") == "error"
+    assert panel._warning_labels[0].toolTip() == "why"
+    panel._set_warnings([])
+    assert panel.card_levels() == [] and not panel.warnings_box.isVisibleTo(window)
+
+
+def test_max_cowl_with_custom_angles_shows_info_card(qtbot, window):
+    _set(qtbot, window, method="custom", custom_angles=(8.0, 9.0), max_cowl_enabled=True)
+    panel = window.results_panel
+    assert window.state.design is not None
+    assert "info" in panel.card_levels()
+    [note] = [t for t, lv in zip(panel.warning_texts(), panel.warning_levels()) if lv == "info"]
+    assert "ignored for custom angles" in note

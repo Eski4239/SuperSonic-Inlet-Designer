@@ -1,7 +1,7 @@
 """Subprocess probe for test_scaling.py: build the main window at QT_SCALE_FACTOR (set by the
 caller) at its minimum size and report clipped widgets as JSON on stdout.
 
-Usage: python scaling_probe.py [screenshot.png]
+Usage: python scaling_probe.py [design_tab.png [offdesign_tab.png]]
 """
 import json
 import os
@@ -73,8 +73,16 @@ def main():
         settle()
     window.state.update(n_ramps=2)
     settle()
+    problems = clipped_widgets(window) + panel_overflow(window)
+    window.tabs.setCurrentWidget(window.offdesign_tab)       # the off-design tab too
+    settle()
+    problems += [dict(p, tab="Off-design") for p in clipped_widgets(window)]
     result = {"dpr": window.devicePixelRatioF(), "size": [window.width(), window.height()],
-              "problems": clipped_widgets(window) + panel_overflow(window)}
+              "problems": problems}
+    if len(sys.argv) > 2:
+        window.grab().save(sys.argv[2])
+    window.tabs.setCurrentWidget(window.canvas)
+    settle(200)
     if len(sys.argv) > 1:
         window.grab().save(sys.argv[1])
     window.state.shutdown()

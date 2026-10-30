@@ -4,7 +4,7 @@ import math
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
-from .. import theme
+from ..theme import qt as theme
 
 
 class NumberField(QWidget):
